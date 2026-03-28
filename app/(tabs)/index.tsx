@@ -4,6 +4,7 @@
 // A banner at the top calls out any plants that need water today.
 
 import { Image } from 'expo-image'
+import { LinearGradient } from 'expo-linear-gradient'
 import { useFocusEffect, useRouter } from 'expo-router'
 import { useCallback, useState } from 'react'
 import {
@@ -244,8 +245,13 @@ export default function MyPlantsScreen() {
                       </View>
                     )}
 
-                    {/* Bottom gradient overlay so text is legible over any photo */}
-                    <View style={styles.cardGradient} />
+                    {/* Gradient fade from transparent → dark so text is legible over any photo */}
+                    <LinearGradient
+                      colors={['transparent', 'rgba(0,0,0,0.72)']}
+                      start={{ x: 0, y: 0.35 }}
+                      end={{ x: 0, y: 1 }}
+                      style={StyleSheet.absoluteFillObject}
+                    />
 
                     {/* Watering status badge — top right corner */}
                     {label !== '' && (
@@ -376,18 +382,7 @@ const styles = StyleSheet.create({
     fontSize: 48,
   },
 
-  // Semi-transparent dark gradient at the bottom of each card
-  // Makes the white nickname text legible over any photo color
-  cardGradient: {
-    position: 'absolute',
-    bottom: 0, left: 0, right: 0,
-    height: '55%',
-    // Fade from transparent (top) to dark (bottom)
-    // React Native doesn't support CSS gradients, so we simulate with opacity + color
-    backgroundColor: 'rgba(0,0,0,0.52)',
-    // The fade effect uses a trick: make the top portion transparent via borderRadius
-    // on a taller view. For a real gradient, add expo-linear-gradient later.
-  },
+  // (gradient is handled by the LinearGradient component, no style needed here)
 
   // Watering status badge — sits in the top-right corner of the card
   badge: {

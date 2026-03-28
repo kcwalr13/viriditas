@@ -359,14 +359,24 @@ export default function PlantDetailScreen() {
       })
 
       if (error) {
-        let message = error.message
+        // Log the full error object so it's visible in browser DevTools if needed
+        console.error('[Analyze] Edge Function error:', error)
+        // Try to extract a more specific message from the response body
+        let message = error.message || 'Edge Function call failed'
         try {
           const body = await (error as any).context?.json?.()
           if (body?.error) message = body.error
         } catch {}
         throw new Error(message)
       }
-      if (data?.error) throw new Error(data.error)
+      if (data?.error) {
+        console.error('[Analyze] Server-side error:', data.error)
+        throw new Error(data.error)
+      }
+      if (!data?.result) {
+        console.error('[Analyze] Unexpected response shape:', data)
+        throw new Error('Unexpected response from analysis service.')
+      }
 
       const result = data.result
 
@@ -391,6 +401,7 @@ export default function PlantDetailScreen() {
       await fetchAnalysisHistory()
 
     } catch (error: any) {
+      console.error('[Analyze] Caught error:', error)
       Alert.alert('Analysis failed', error.message || 'Something went wrong. Please try again.')
     } finally {
       setAnalyzing(false)

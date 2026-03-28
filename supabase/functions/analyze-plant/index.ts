@@ -108,20 +108,40 @@ Only respond with the JSON object. No extra text.${speciesSection}${historySecti
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// Fetch an image from a URL and return it as a base64 string.
-// Running this on the server sidesteps React Native binary conversion issues.
-async function fetchImageAsBase64(imageUrl: string): Promise<string> {
+// Supported image media types for both Claude and Gemini
+type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
+
+// Fetch an image from a URL and return it as a base64 string plus its media type.
+// Detecting the real media type is important — browsers commonly upload WebP,
+// and the Claude API will reject the request if the declared type doesn't match.
+async function fetchImageAsBase64(imageUrl: string): Promise<{ base64: string; mediaType: ImageMediaType }> {
   const response = await fetch(imageUrl)
   if (!response.ok) {
     throw new Error(`Failed to fetch image (${response.status}): ${imageUrl}`)
   }
+
   const arrayBuffer = await response.arrayBuffer()
-  return encodeBase64(arrayBuffer)
+  const base64 = encodeBase64(arrayBuffer)
+
+  // Read the actual content type from the response headers.
+  // Fall back to inspecting the URL extension, then default to jpeg.
+  const contentType = response.headers.get('content-type') ?? ''
+  let mediaType: ImageMediaType = 'image/jpeg'
+  if (contentType.includes('webp')) mediaType = 'image/webp'
+  else if (contentType.includes('png')) mediaType = 'image/png'
+  else if (contentType.includes('gif')) mediaType = 'image/gif'
+  else if (contentType.includes('jpeg') || contentType.includes('jpg')) mediaType = 'image/jpeg'
+  else if (imageUrl.endsWith('.webp')) mediaType = 'image/webp'
+  else if (imageUrl.endsWith('.png')) mediaType = 'image/png'
+  else if (imageUrl.endsWith('.gif')) mediaType = 'image/gif'
+
+  console.log(`Fetched image — content-type: ${contentType}, resolved media type: ${mediaType}`)
+  return { base64, mediaType }
 }
 
 // ── Claude ────────────────────────────────────────────────────────────────────
 
-async function callClaude(base64Image: string, prompt: string): Promise<string> {
+async function callClaude(base64Image: string, mediaType: ImageMediaType, prompt: string): Promise<string> {
   const apiKey = Deno.env.get('ANTHROPIC_API_KEY')
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY secret is not set')
 
@@ -140,7 +160,8 @@ async function callClaude(base64Image: string, prompt: string): Promise<string> 
         content: [
           {
             type: 'image',
-            source: { type: 'base64', media_type: 'image/jpeg', data: base64Image },
+            // Use the actual detected media type — not a hardcoded jpeg
+            source: { type: 'base64', media_type: mediaType, data: base64Image },
           },
           { type: 'text', text: prompt },
         ],
@@ -163,7 +184,7 @@ async function callClaude(base64Image: string, prompt: string): Promise<string> 
 
 // ── Gemini ────────────────────────────────────────────────────────────────────
 
-async function callGemini(base64Image: string, prompt: string): Promise<string> {
+async function callGemini(base64Image: string, mediaType: ImageMediaType, prompt: string): Promise<string> {
   const apiKey = Deno.env.get('GEMINI_API_KEY')
   if (!apiKey) throw new Error('GEMINI_API_KEY secret is not set')
 
@@ -176,7 +197,8 @@ async function callGemini(base64Image: string, prompt: string): Promise<string> 
     body: JSON.stringify({
       contents: [{
         parts: [
-          { inline_data: { mime_type: 'image/jpeg', data: base64Image } },
+          // Use the actual detected media type — not a hardcoded jpeg
+          { inline_data: { mime_type: mediaType, data: base64Image } },
           { text: prompt },
         ],
       }],
@@ -224,17 +246,19 @@ serve(async (req) => {
       speciesProfile ? 'species profile included' : 'no species profile'
     )
 
-    // Fetch the image from the URL and convert to base64 server-side
-    const base64Image = await fetchImageAsBase64(imageUrl)
+    // Fetch the image from the URL and convert to base64 server-side.
+    // fetchImageAsBase64 also detects the real media type from response headers
+    // so we don't hardcode jpeg and break on WebP uploads from the browser.
+    const { base64: base64Image, mediaType } = await fetchImageAsBase64(imageUrl)
 
     // Choose provider based on environment variable — defaults to claude
     const provider = Deno.env.get('AI_PROVIDER') ?? 'claude'
     let resultText: string
 
     if (provider === 'claude') {
-      resultText = await callClaude(base64Image, prompt)
+      resultText = await callClaude(base64Image, mediaType, prompt)
     } else if (provider === 'gemini') {
-      resultText = await callGemini(base64Image, prompt)
+      resultText = await callGemini(base64Image, mediaType, prompt)
     } else {
       throw new Error(`Unknown AI_PROVIDER: ${provider}`)
     }

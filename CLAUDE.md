@@ -59,7 +59,7 @@ viriditas/
 ## What Has Been Built
 - [x] Expo project initialized with Expo Router
 - [x] Supabase project created and connected
-- [x] `lib/supabase.ts` — shared Supabase client with AsyncStorage session persistence
+- [x] `lib/supabase.ts` — shared Supabase client; AsyncStorage on native, localStorage on web (SSR-safe)
 - [x] Environment variables configured via `.env.local` (EXPO_PUBLIC_SUPABASE_URL, EXPO_PUBLIC_SUPABASE_ANON_KEY)
 - [x] User authentication — sign up, sign in, sign out, auth-gated navigation
 - [x] `app/(auth)/sign-in.tsx` and `app/(auth)/sign-up.tsx`
@@ -88,9 +88,13 @@ viriditas/
 - [x] "Refresh" button on Plant Detail screen regenerates species profile on demand
 - [x] `lib/types.ts` — `SpeciesProfile` type added
 - [x] App icon — plant sprout on brand green (#2d6a4f), 1024×1024 PNG; used for icon, splash, and favicon
-- [x] `components/PageContainer.tsx` — responsive layout wrapper; constrains content to 600px max-width on web, passthrough on native
+- [x] `components/PageContainer.tsx` — responsive layout wrapper; constrains content to 800px max-width on web, passthrough on native
 - [x] `lib/notifications.ts` — updated to skip expo-notifications on web (`Platform.OS === 'web'`) in addition to Expo Go
 - [x] `vercel.json` — Vercel deployment config (build command, output directory, SPA rewrites)
+- [x] Web deployment live on Vercel — full app accessible via browser on any device
+- [x] Web SSR crash fixed: `lib/supabase.ts` uses `Platform.OS === 'web'` to avoid AsyncStorage during Expo's Node.js static render pass
+- [x] Web UI fixes: JSX comment rendering bug fixed; scrollbar hidden on plant detail; max-width increased to 800px
+- [x] `app/(tabs)/index.tsx` — My Plants rebuilt as 2-column photo grid with watering status badges and attention banner
 
 ## What Comes Next
 See ROADMAP.md for the full feature breakdown and phase plan.
@@ -151,4 +155,9 @@ requirements are — before it even looks at the photo.
 - **Base64 encoding in Edge Functions:** Use Deno's std library (`import { encode as encodeBase64 } from 'https://deno.land/std@0.168.0/encoding/base64.ts'`) — do not use `btoa()` with manually built binary strings on large images as it can fail.
 - **expo-notifications in Expo Go and web:** Remote push notifications were removed from Expo Go in SDK 53, and expo-notifications is not supported on web at all. Always use `lib/notifications.ts` wrapper (never import `expo-notifications` directly). The wrapper skips the module when `Platform.OS === 'web'` OR `Constants.appOwnership === 'expo'`; notifications work fully in development/production native builds.
 - **Web deployment:** `vercel.json` is configured for static export via `npx expo export --platform web` into `dist/`. Environment variables (EXPO_PUBLIC_SUPABASE_URL, EXPO_PUBLIC_SUPABASE_ANON_KEY) must be set in the Vercel dashboard — they are not read from `.env.local` during Vercel builds.
-- **Responsive layout:** `components/PageContainer.tsx` wraps screens to cap content at 600px max-width on web. On native it is a transparent passthrough. Wrap the outermost return element of any screen that needs responsive behavior.
+- **Supabase client on web:** `lib/supabase.ts` uses `Platform.OS === 'web' ? undefined : AsyncStorage` for the `storage` option. This avoids a `window is not defined` crash during Expo's static render pass (which runs in Node.js). On web, Supabase defaults to `localStorage` in the browser and handles missing `localStorage` gracefully during SSR.
+- **Responsive layout:** `components/PageContainer.tsx` wraps screens to cap content at 800px max-width on web. On native it is a transparent passthrough. Wrap the outermost return element of any screen that needs responsive behavior.
+- **JSX comments in web screens:** Always use `{/* comment */}` syntax inside JSX — never `// comment`. JavaScript-style `//` comments placed as JSX children render as visible text on screen.
+- **ScrollView on web:** Add `showsVerticalScrollIndicator={false}` to ScrollViews in screens wrapped with PageContainer. This suppresses the internal scrollbar track, which looks out of place in a browser. Content is still fully scrollable via mouse wheel and trackpad.
+- **Photo grid pattern:** Use `flexDirection: 'row', flexWrap: 'wrap'` on a View for a 2-column grid. Each card uses `width: '50%'` with padding for gutters. Use a `cardOuter` (width + padding) + `cardInner` (aspectRatio + borderRadius + overflow: hidden) two-layer structure so the border radius clips the photo correctly. Use `StyleSheet.absoluteFillObject` on the Image for full-bleed background photos.
+- **Enriching plant list data efficiently:** Fetch plants, then fetch photos and care_logs with `.in('plant_id', plantIds)` — 3 total queries regardless of collection size. Build lookup maps in JavaScript (first occurrence per plant_id = most recent, since queries are ordered descending).

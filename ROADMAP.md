@@ -173,8 +173,8 @@ plant before it even sees the photo.
 
 ---
 
-## Phase 9 — Polish & Launch 🔄
-Deploying Viriditas as a web app (PWA) accessible on any device via browser.
+## Phase 9 — Polish & Launch ✅
+Viriditas is deployed as a live web app accessible on any device via browser.
 Native app store builds (EAS) can follow later without significant code changes.
 
 **Why web first:**
@@ -191,14 +191,87 @@ deploys on every push. Environment variables (Supabase URL, anon key) set in Ver
 | App icon (plant sprout on brand green) | ✅ |
 | Splash screen updated to use new icon | ✅ |
 | Web support confirmed (react-dom, react-native-web already installed) | ✅ |
-| Responsive layout via PageContainer component (max-width 600px on desktop) | ✅ |
+| Responsive layout via PageContainer component (max-width 800px on desktop) | ✅ |
 | expo-notifications safely skipped on web | ✅ |
 | vercel.json configured (build command, output dir, SPA rewrites) | ✅ |
-| Install @expo/metro-runtime web dependency | ⬜ |
-| Push code to GitHub | ⬜ |
-| Connect repo to Vercel and set environment variables | ⬜ |
-| Confirm live web deployment | ⬜ |
+| Fix SSR crash: supabase.ts uses localStorage on web instead of AsyncStorage | ✅ |
+| Web UI fixes: JSX comment bug, scrollbar hidden, max-width increased to 800px | ✅ |
+| Push code to GitHub (auto-deploys via Vercel) | ✅ |
+| Connect repo to Vercel and set environment variables | ✅ |
+| Confirm live web deployment | ✅ |
 | (Future) EAS Build for native Android/iOS with full notification support | ⬜ |
+
+---
+
+## Phase 10 — UI & UX Overhaul 🔄
+A comprehensive design, usability, and functionality upgrade based on a product design
+and botanical expert review. Goal: an app that is genuinely useful daily and a joy to use.
+
+**Core diagnosis:**
+The underlying architecture is solid, but the app currently feels like a database with a
+thin UI — not something you'd reach for every morning. The plant list has no photos. There's
+no at-a-glance care status. The care model is too thin for real gardeners. And the daily
+use loop (open app → know what needs attention → act) is missing entirely.
+
+**Design principles for this phase:**
+- Visual first: plants are beautiful things; the app should feel that way
+- Reduce friction: care logging should be instant and satisfying
+- Actionable at a glance: open the app and immediately know what needs attention
+- Progressive disclosure: surface what's relevant, don't overwhelm
+
+---
+
+### Phase 10A — Visual Plant Collection ✅
+Replace text list with a photo grid. Each card shows cover photo, nickname, species,
+and a watering status badge. A banner at the top flags plants that need attention.
+
+| Task | Status |
+|---|---|
+| 2-column photo grid on My Plants screen | ✅ |
+| Cover photo fetched from most recent plant photo | ✅ |
+| Watering status badge per card (good / due soon / overdue) | ✅ |
+| "N plants need water" attention banner in header | ✅ |
+| Improved empty state with icon and welcoming copy | ✅ |
+
+---
+
+### Phase 10B — Plant Detail Restructure ⬜
+Reorganize the long-scroll plant detail into a tabbed layout. Make care actions
+immediately accessible without scrolling.
+
+| Task | Status |
+|---|---|
+| Tab layout: Overview / Care History / Species Guide | ⬜ |
+| Overview tab: hero photo gallery, quick-action bar, latest analysis summary | ⬜ |
+| Care History tab: unified chronological timeline (logs + analyses combined) | ⬜ |
+| Species Guide tab: full species profile in its own space | ⬜ |
+| Quick-action bar (Water / Fertilize / Note) always visible on Overview | ⬜ |
+
+---
+
+### Phase 10C — Richer Plant Data ⬜
+Add fields and care log types that real gardeners actually track.
+
+| Task | Status |
+|---|---|
+| Additional care log types: repotted, pruned, misted, pest treatment, moved | ⬜ |
+| Plant location field (e.g. "Living room — east window") | ⬜ |
+| Pot size field | ⬜ |
+| Acquisition date field | ⬜ |
+| Last repotted date field | ⬜ |
+| Location and pot data passed as context to AI analysis | ⬜ |
+
+---
+
+### Phase 10D — Today View ⬜
+Add a lightweight "what needs attention today" layer so the app becomes a daily habit.
+
+| Task | Status |
+|---|---|
+| Plants due for water shown prominently at top of collection | ⬜ |
+| Overdue watering shown distinctly from "due today" | ⬜ |
+| "All caught up" positive state when nothing is overdue | ⬜ |
+| Care streak tracking (consecutive days with logged care) | ⬜ |
 
 ---
 
@@ -219,3 +292,6 @@ deploys on every push. Environment variables (Supabase URL, anon key) set in Ver
 - **2026-03-27** — Phase 8 scope decision: encyclopedia repurposed as per-plant species profiles rather than a searchable index. Each registered plant gets a one-time AI-generated species profile saved to the database. The explore tab will show this profile for a selected plant. Goal is that users build up a rich, detailed record for each of their specific plants — encyclopedic facts + personal observations combined.
 - **2026-03-27** — Phase 8 data source decision: Claude API only (no third-party plant database). Perenual and similar APIs restrict most of their catalog to paid plans and add an external dependency. Claude's houseplant knowledge is comprehensive, covers any species, returns naturally readable text, and uses infrastructure already in place. Species profiles are cached in Supabase permanently so the AI is only called once per species globally.
 - **2026-03-27** — Phase 8 complete: species_profiles table created; fetch-species-info Edge Function deployed (Claude-powered, provider-swappable, forceRefresh support); species profile auto-fetched after first analysis; displayed on Plant Detail screen as collapsible reference card; species profile passed as context into analyze-plant for species-aware health assessments; Refresh button allows regeneration on demand.
+- **2026-03-28** — Phase 10 design review: app diagnosed as "database with thin UI." Two core problems: (1) plant list has no photos — fundamental mismatch for a visual, nature-oriented app; (2) no at-a-glance care status — you can't tell what needs attention without opening each plant. Four-phase UX overhaul planned: 10A visual grid, 10B detail restructure, 10C richer data, 10D today view.
+- **2026-03-28** — Phase 10A complete: My Plants screen rebuilt as 2-column photo grid. Cover photo fetched as most recent photo per plant (3 total DB queries regardless of collection size). Watering status computed from care_logs and plants.watering_interval_days; displayed as colored badge (red=overdue, amber=due soon, transparent=good). Attention banner shows count of plants needing water. Improved empty state with large icon and welcoming copy.
+- **2026-03-28** — Phase 9 complete: Viriditas deployed live on Vercel. Fixed two build-blocking issues: (1) missing @expo/metro-runtime, (2) `window is not defined` SSR crash caused by AsyncStorage being initialized in Node.js during Expo's static render pass — fixed by using `localStorage` on web. Post-deploy web UI fixes: JSX `//` comment rendered as visible text (fixed to `{/* */}`), internal scrollbar shown on plant detail (hidden with showsVerticalScrollIndicator={false}), content too narrow at 600px (increased to 800px).

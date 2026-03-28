@@ -400,6 +400,14 @@ export default function PlantDetailScreen() {
   // ── Photo handling ─────────────────────────────────────────────────────────
 
   function handleAddPhoto() {
+    // On web, Alert.alert doesn't support custom buttons — the browser's native
+    // alert() ignores the buttons array. Skip straight to the file picker instead.
+    // Camera isn't available on web either, so the library is the only option.
+    if (Platform.OS === 'web') {
+      pickImage('library')
+      return
+    }
+
     Alert.alert('Add Photo', 'Where would you like to get the photo?', [
       { text: 'Take Photo', onPress: () => pickImage('camera') },
       { text: 'Choose from Library', onPress: () => pickImage('library') },
@@ -419,17 +427,23 @@ export default function PlantDetailScreen() {
     let result
 
     if (source === 'camera') {
-      const { status } = await ImagePicker.requestCameraPermissionsAsync()
-      if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Camera access is required to take photos.')
-        return
+      // Permission requests are native-only — browsers prompt automatically
+      if (Platform.OS !== 'web') {
+        const { status } = await ImagePicker.requestCameraPermissionsAsync()
+        if (status !== 'granted') {
+          Alert.alert('Permission needed', 'Camera access is required to take photos.')
+          return
+        }
       }
       result = await ImagePicker.launchCameraAsync(pickerOptions)
     } else {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync()
-      if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Photo library access is required.')
-        return
+      // Permission requests are native-only — browsers prompt automatically
+      if (Platform.OS !== 'web') {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync()
+        if (status !== 'granted') {
+          Alert.alert('Permission needed', 'Photo library access is required.')
+          return
+        }
       }
       result = await ImagePicker.launchImageLibraryAsync(pickerOptions)
     }

@@ -1,0 +1,209 @@
+// supabase/functions/fetch-species-info/index.ts
+//
+// Edge Function that fetches encyclopedic species data for a houseplant.
+// Uses the Claude API to generate a structured species profile, then saves
+// it to the species_profiles table so it never needs to be fetched again.
+//
+// Accepts:
+//   speciesName — the species name as identified by AI analysis (required)
+//
+// Behaviour:
+//   1. Checks if a profile already exists in species_profiles for this species.
+//   2. If yes, returns it immediately (no AI call needed).
+//   3. If no, calls Claude to generate a rich JSON species profile.
+//   4. Saves the profile to species_profiles (keyed by species name).
+//   5. Returns the profile to the app.
+//
+// Because profiles are shared across all users, the AI is called at most once
+// per species ever — subsequent users with the same plant get the cached version.
+//
+// Supported providers (set via AI_PROVIDER secret):
+//   claude  — Anthropic Claude API (current default)
+//   gemini  — Google Gemini
+
+import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+// Required for all Supabase Edge Functions — allows the app to call this function
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+// ── Prompt ────────────────────────────────────────────────────────────────────
+
+// Builds the prompt for the AI species profile request.
+// We ask for strict JSON so the response can be reliably parsed and stored.
+function buildSpeciesPrompt(speciesName: string): string {
+  return `You are an expert botanist and houseplant care specialist.
+
+Provide a comprehensive care and reference profile for the following houseplant: "${speciesName}"
+
+Respond with a JSON object in exactly this format — no extra text, no markdown fences:
+{
+  "common_names": "Comma-separated list of common names (e.g. Rubber Plant, Rubber Fig)",
+  "scientific_name": "The full scientific/Latin name (e.g. Ficus elastica)",
+  "light": "Detailed light requirements: preferred intensity, direct vs indirect, seasonal variation, signs of too much or too little light",
+  "watering": "How often to water, how to check soil moisture, signs of overwatering and underwatering, any seasonal adjustments",
+  "humidity": "Preferred humidity range, whether misting helps, any special humidity needs",
+  "temperature": "Ideal temperature range in both Fahrenheit and Celsius, cold/heat tolerance, whether to keep away from drafts or vents",
+  "soil": "Best soil mix, drainage requirements, when and how to repot, pot size guidance",
+  "toxicity": "Whether toxic to cats, dogs, or humans — be specific about symptoms if toxic",
+  "common_problems": "The most common issues (yellowing leaves, root rot, pests, etc), what causes them, and how to treat them",
+  "growth_habits": "Typical size at maturity, growth rate, growth pattern (bushy, trailing, upright, etc), any notable characteristics",
+  "propagation": "The easiest and most reliable method(s) to propagate this plant, with brief steps"
+}
+
+If the species name is unrecognized or too vague to give reliable care information, still return the JSON but note the uncertainty in the relevant fields.`
+}
+
+// ── Claude ────────────────────────────────────────────────────────────────────
+
+async function callClaude(speciesName: string): Promise<Record<string, string>> {
+  const apiKey = Deno.env.get('ANTHROPIC_API_KEY')
+  if (!apiKey) throw new Error('ANTHROPIC_API_KEY secret is not set')
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 2048,   // Species profiles are longer than health analyses
+      messages: [{
+        role: 'user',
+        content: buildSpeciesPrompt(speciesName),
+      }],
+    }),
+  })
+
+  const data = await response.json()
+  if (!response.ok) throw new Error(data.error?.message ?? 'Claude API error')
+
+  // Strip any markdown code fences Claude might add
+  let text: string = data.content[0].text
+  text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
+  return JSON.parse(text)
+}
+
+// ── Gemini ────────────────────────────────────────────────────────────────────
+
+async function callGemini(speciesName: string): Promise<Record<string, string>> {
+  const apiKey = Deno.env.get('GEMINI_API_KEY')
+  if (!apiKey) throw new Error('GEMINI_API_KEY secret is not set')
+
+  const model = 'gemini-2.5-flash'
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: buildSpeciesPrompt(speciesName) }] }],
+      generationConfig: { responseMimeType: 'application/json' },
+    }),
+  })
+
+  const data = await response.json()
+  if (!response.ok) throw new Error(data.error?.message ?? 'Gemini API error')
+
+  return JSON.parse(data.candidates[0].content.parts[0].text)
+}
+
+// ── Main handler ──────────────────────────────────────────────────────────────
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  try {
+    const { speciesName, forceRefresh = false } = await req.json()
+
+    if (!speciesName || typeof speciesName !== 'string' || speciesName.trim() === '') {
+      return new Response(
+        JSON.stringify({ error: 'speciesName is required' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    const normalizedName = speciesName.trim()
+
+    // Create a Supabase client using the service role key.
+    // The service role bypasses RLS, letting the Edge Function read and write
+    // species_profiles without needing a user token.
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+    )
+
+    // ── Check cache first (unless forceRefresh requested) ────────────────────
+
+    if (!forceRefresh) {
+      const { data: existing, error: fetchError } = await supabase
+        .from('species_profiles')
+        .select('*')
+        .eq('species_name', normalizedName)
+        .single()
+
+      if (existing && !fetchError) {
+        console.log('Returning cached species profile for:', normalizedName)
+        return new Response(
+          JSON.stringify({ profile: existing, cached: true }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+    } else {
+      console.log('Force refresh requested for:', normalizedName)
+    }
+
+    // ── Fetch from AI ────────────────────────────────────────────────────────
+
+    console.log('Fetching new species profile for:', normalizedName)
+
+    const provider = Deno.env.get('AI_PROVIDER') ?? 'claude'
+    let profileFields: Record<string, string>
+
+    if (provider === 'claude') {
+      profileFields = await callClaude(normalizedName)
+    } else if (provider === 'gemini') {
+      profileFields = await callGemini(normalizedName)
+    } else {
+      throw new Error(`Unknown AI_PROVIDER: ${provider}`)
+    }
+
+    // ── Save to database ─────────────────────────────────────────────────────
+
+    // Upsert in case of a race condition (two users fetching the same species
+    // at the same moment — only one row should exist)
+    const { data: saved, error: saveError } = await supabase
+      .from('species_profiles')
+      .upsert({
+        species_name: normalizedName,
+        ...profileFields,
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'species_name',  // Don't fail if it was just inserted by another request
+      })
+      .select()
+      .single()
+
+    if (saveError) {
+      throw new Error(`Failed to save species profile: ${saveError.message}`)
+    }
+
+    return new Response(
+      JSON.stringify({ profile: saved, cached: false }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  } catch (error) {
+    console.error('fetch-species-info error:', error)
+    return new Response(
+      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    )
+  }
+})

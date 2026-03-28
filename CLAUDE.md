@@ -1,0 +1,154 @@
+# Viriditas — Project Instructions for Claude
+
+## What This App Is
+Viriditas is a houseplant care guide, companion, and plant registry app. Users can photograph plants for AI-powered health analysis and species identification, register and track individual plants over time (care logs, health history, photo records), and access expert care guidance. The goal is for each registered plant to have a rich, comprehensive profile — combining encyclopedic species knowledge with the user's personal observations, photos, and care history.
+
+## The Developer
+Kyle is a beginner developer who relies on Claude to write most of the code. Always:
+- Explain decisions and tradeoffs before writing code
+- Anticipate problems the user may not know to ask about
+- Give explicit step-by-step instructions for any manual setup steps
+- Add comments to code explaining what each part does
+- Specify filenames and where they belong in the project structure
+- Build incrementally — get something working first, then improve it
+
+## Tech Stack
+| Layer | Tool |
+|---|---|
+| Mobile + Web UI | Expo (React Native) with Expo Router |
+| Auth | Supabase Auth |
+| Database | Supabase (PostgreSQL) |
+| File/Photo Storage | Supabase Storage |
+| AI Integration | Supabase Edge Functions → configurable AI provider (currently Claude API via claude-haiku-4-5-20251001; Gemini also supported) |
+| Push Notifications | Expo Notifications |
+| Deployment | EAS Build |
+
+**Language:** TypeScript throughout.
+
+## Project Structure
+```
+viriditas/
+  app/
+    (auth)/             # Auth screens (not shown in URL)
+      _layout.tsx       # Auth stack layout
+      sign-in.tsx       # Sign in screen
+      sign-up.tsx       # Sign up screen
+    (tabs)/             # Tab navigator screens
+      _layout.tsx       # Tab bar layout
+      index.tsx         # My Plants screen (main tab)
+      explore.tsx       # Repurposed: shows species profile for a selected plant
+    plant/
+      [id].tsx          # Plant Detail screen (dynamic route)
+    add-plant.tsx       # Add Plant screen
+    _layout.tsx         # Root layout — auth gating lives here
+  components/           # Reusable UI components
+  lib/
+    supabase.ts         # Supabase client (single shared instance)
+    notifications.ts    # Safe wrapper around expo-notifications (handles Expo Go)
+    types.ts            # Shared TypeScript types (Plant, PlantPhoto, etc.)
+  supabase/
+    functions/
+      analyze-plant/
+        index.ts        # Edge Function: AI plant analysis (provider-swappable)
+      fetch-species-info/
+        index.ts        # Edge Function: AI species profile fetch (provider-swappable)
+  assets/               # Images, fonts, icons
+  .env.local            # API keys — never commit this file
+```
+
+## What Has Been Built
+- [x] Expo project initialized with Expo Router
+- [x] Supabase project created and connected
+- [x] `lib/supabase.ts` — shared Supabase client with AsyncStorage session persistence
+- [x] Environment variables configured via `.env.local` (EXPO_PUBLIC_SUPABASE_URL, EXPO_PUBLIC_SUPABASE_ANON_KEY)
+- [x] User authentication — sign up, sign in, sign out, auth-gated navigation
+- [x] `app/(auth)/sign-in.tsx` and `app/(auth)/sign-up.tsx`
+- [x] `app/_layout.tsx` — auth state listener with automatic routing
+- [x] `plants` table in Supabase with RLS policies (users see only their own plants)
+- [x] `lib/types.ts` — Plant and PlantPhoto types defined
+- [x] `app/(tabs)/index.tsx` — My Plants list screen with empty state
+- [x] `app/add-plant.tsx` — Add Plant form
+- [x] `app/plant/[id].tsx` — Plant Detail screen with photo gallery, AI analysis, edit, and delete
+- [x] `plant-photos` Supabase Storage bucket and `photos` table with RLS policies
+- [x] `supabase/functions/analyze-plant/index.ts` — Edge Function for AI plant analysis
+- [x] AI analysis UI — "Analyze Plant" button + results card (species, health, care tips)
+- [x] `analysis_results` table in Supabase with RLS policies
+- [x] Analysis results saved to DB after every run; history shown in collapsible section on Plant Detail screen
+- [x] Progress-aware AI prompts — up to 3 previous analyses sent as context so Claude can describe changes over time
+- [x] `care_logs` table in Supabase with RLS policies
+- [x] Care logging UI — quick-tap Watered/Fertilized buttons + custom Note input on Plant Detail screen
+- [x] Care history shown in collapsible list on Plant Detail screen
+- [x] `expo-notifications` installed via `lib/notifications.ts` safe wrapper (Expo Go compatible)
+- [x] Per-plant watering reminders — 5 preset intervals (3/5/7/10/14 days); stored in `plants.watering_interval_days`; notification ID in AsyncStorage
+- [x] `species_profiles` table in Supabase (keyed by species name, shared across all users, RLS: authenticated read)
+- [x] `supabase/functions/fetch-species-info/index.ts` — Edge Function: AI-powered species profile fetch (Claude-powered, provider-swappable, forceRefresh support)
+- [x] Species profile auto-fetched in background after first AI analysis identifies a species
+- [x] Species profile displayed on Plant Detail screen as collapsible reference card (light, watering, humidity, temperature, soil, toxicity, common problems, growth habits, propagation)
+- [x] Species profile passed as context into `analyze-plant` so health analyses are species-aware
+- [x] "Refresh" button on Plant Detail screen regenerates species profile on demand
+- [x] `lib/types.ts` — `SpeciesProfile` type added
+- [x] App icon — plant sprout on brand green (#2d6a4f), 1024×1024 PNG; used for icon, splash, and favicon
+- [x] `components/PageContainer.tsx` — responsive layout wrapper; constrains content to 600px max-width on web, passthrough on native
+- [x] `lib/notifications.ts` — updated to skip expo-notifications on web (`Platform.OS === 'web'`) in addition to Expo Go
+- [x] `vercel.json` — Vercel deployment config (build command, output directory, SPA rewrites)
+
+## What Comes Next
+See ROADMAP.md for the full feature breakdown and phase plan.
+
+## Plant Profile Architecture
+Each plant in Viriditas has two layers of information that together form its complete profile:
+
+**Layer 1 — Personal data (user-specific, evolves over time):**
+- Nickname, notes, and photos added by the user
+- AI health analyses and species identifications over time
+- Care logs (watered, fertilized, notes)
+- Watering reminder interval
+
+**Layer 2 — Species reference data (encyclopedic, fetched once and cached permanently):**
+- Generated by the `fetch-species-info` Edge Function using the Claude API when a species is identified
+- Stored in the `species_profiles` table, keyed by species name, shared across all users
+- Covers: light, water, humidity, soil, temperature, toxicity, common problems, growth habits, propagation
+- Displayed as a permanent reference section on the Plant Detail screen
+- Fetched at most once per species globally — any subsequent user with the same plant gets the cached version instantly, with no API call
+- Refreshable by the user on demand if they want updated information
+- Also passed as context to `analyze-plant` so health analyses are species-aware
+
+**Why Claude for species data:**
+Third-party plant databases (e.g. Perenual) restrict most of their species catalog to paid
+plans and introduce an additional external dependency. Claude has comprehensive knowledge of
+common houseplants, covers any species without catalog limits, returns naturally readable
+text, and uses infrastructure already in place. The per-species caching model means ongoing
+API costs are negligible — the AI is called once per species, ever.
+
+**How the layers combine:**
+When the user runs an AI health analysis, the app passes the cached species profile alongside
+the photo and care history. This makes every analysis species-aware: Claude already knows
+what "normal" looks like for that plant, what its common problems are, and what its care
+requirements are — before it even looks at the photo.
+
+## Coding Conventions
+- Use TypeScript (`.tsx` for files with JSX, `.ts` for pure logic)
+- Use `StyleSheet.create()` for React Native styles (not inline style objects)
+- Import Supabase via `import { supabase } from '@/lib/supabase'`
+- Import shared types via `import { Plant } from '@/lib/types'`
+- Keep screens in `app/`, reusable components in `components/`, shared logic in `lib/`
+- Never put API keys or secrets in app code — use `.env.local` and Supabase Edge Functions
+- Use `npx expo install` for packages with native dependencies; `npm install` for pure JS packages
+- Use `useFocusEffect` + `useCallback` to refresh data when navigating back to a screen
+- Dynamic routes use folder/[param].tsx pattern (e.g. `app/plant/[id].tsx`)
+
+## Important Notes
+- Kyle is on a Mac, developing for Android (Expo Go on Android device)
+- Both Mac and Android must be on the same Wi-Fi network for live preview
+- Restart `npx expo start` after any changes to `.env.local`
+- AI API keys must never be in frontend code — they belong in a Supabase Edge Function as secrets
+- Supabase email confirmation is currently disabled (for development); re-enable before launch
+- **Expo Router 6 auth gating:** `useSegments()` and `usePathname()` are unreliable during initial render. Use pure session-based routing in `_layout.tsx` — redirect to `/(tabs)` if session exists, `/(auth)/sign-in` if not. The effect only re-runs when session/loading changes, so it won't interrupt sign-up navigation.
+- **Uploading images to Supabase Storage:** React Native's `Blob` does not support `.arrayBuffer()`. Always use `base64: true` in ImagePicker options, then decode manually: `atob(base64)` → `Uint8Array` → `.buffer` for the upload call.
+- **AI Edge Function invocation:** `supabase.functions.invoke` does not reliably inject the auth token in React Native. Always get the session explicitly and pass it: `const { data: { session } } = await supabase.auth.getSession()`, then pass `headers: { Authorization: \`Bearer ${session.access_token}\` }`.
+- **Edge Function deployment:** Deploy with `--no-verify-jwt` flag (`supabase functions deploy analyze-plant --no-verify-jwt`) — the function does its own auth via the explicitly passed token. Standard JWT verification at the gateway level fails in React Native.
+- **AI provider switching:** Controlled by the `AI_PROVIDER` Supabase secret. Set to `claude` (current) or `gemini`. Requires a redeploy after changing. Claude model: `claude-haiku-4-5-20251001`. Gemini model: `gemini-2.5-flash`.
+- **Base64 encoding in Edge Functions:** Use Deno's std library (`import { encode as encodeBase64 } from 'https://deno.land/std@0.168.0/encoding/base64.ts'`) — do not use `btoa()` with manually built binary strings on large images as it can fail.
+- **expo-notifications in Expo Go and web:** Remote push notifications were removed from Expo Go in SDK 53, and expo-notifications is not supported on web at all. Always use `lib/notifications.ts` wrapper (never import `expo-notifications` directly). The wrapper skips the module when `Platform.OS === 'web'` OR `Constants.appOwnership === 'expo'`; notifications work fully in development/production native builds.
+- **Web deployment:** `vercel.json` is configured for static export via `npx expo export --platform web` into `dist/`. Environment variables (EXPO_PUBLIC_SUPABASE_URL, EXPO_PUBLIC_SUPABASE_ANON_KEY) must be set in the Vercel dashboard — they are not read from `.env.local` during Vercel builds.
+- **Responsive layout:** `components/PageContainer.tsx` wraps screens to cap content at 600px max-width on web. On native it is a transparent passthrough. Wrap the outermost return element of any screen that needs responsive behavior.

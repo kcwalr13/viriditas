@@ -1,98 +1,117 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+// app/(tabs)/index.tsx
+// The main screen — shows the user's list of registered plants.
+// Refreshes automatically every time you navigate back to this screen.
+import { supabase } from '@/lib/supabase'
+import { Plant } from '@/lib/types'
+import { useFocusEffect, useRouter } from 'expo-router'
+import { useCallback, useState } from 'react'
+import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native'
+import PageContainer from '@/components/PageContainer'
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+export default function MyPlantsScreen() {
+  const [plants, setPlants] = useState<Plant[]>([])
+  const [loading, setLoading] = useState(true)
+  const router = useRouter()
 
-export default function HomeScreen() {
+  async function fetchPlants() {
+    const { data, error } = await supabase
+      .from('plants')
+      .select('*')
+      .order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('Error fetching plants:', error)
+    } else {
+      setPlants(data || [])
+    }
+    setLoading(false)
+  }
+
+  // useFocusEffect runs fetchPlants every time this screen comes into view —
+  // so the list updates after you add or edit a plant and navigate back.
+  useFocusEffect(
+    useCallback(() => {
+      fetchPlants()
+    }, [])
+  )
+
+  if (loading) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" color="#2d6a4f" />
+      </View>
+    )
+  }
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+    <PageContainer>
+    <View style={styles.container}>
+      <Text style={styles.header}>My Plants</Text>
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
-  );
+      {plants.length === 0 ? (
+        <View style={styles.empty}>
+          <Text style={styles.emptyText}>No plants yet.</Text>
+          <Text style={styles.emptySubtext}>Tap the button below to add your first plant!</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={plants}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={styles.plantCard}
+              onPress={() => router.push(`/plant/${item.id}`)}
+            >
+              <Text style={styles.plantNickname}>{item.nickname}</Text>
+              {item.species && (
+                <Text style={styles.plantSpecies}>{item.species}</Text>
+              )}
+            </TouchableOpacity>
+          )}
+          contentContainerStyle={{ paddingBottom: 120 }}
+        />
+      )}
+
+      <TouchableOpacity
+        style={styles.addButton}
+        onPress={() => router.push('/add-plant')}
+      >
+        <Text style={styles.addButtonText}>+ Add Plant</Text>
+      </TouchableOpacity>
+    </View>
+    </PageContainer>
+  )
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  container: { flex: 1, backgroundColor: '#fff', paddingHorizontal: 20, paddingTop: 60 },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  header: { fontSize: 32, fontWeight: 'bold', color: '#2d6a4f', marginBottom: 24 },
+  empty: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  emptyText: { fontSize: 18, color: '#555', marginBottom: 8 },
+  emptySubtext: { fontSize: 15, color: '#aaa', textAlign: 'center' },
+  plantCard: {
+    backgroundColor: '#f4faf7',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#d4eadf',
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
+  plantNickname: { fontSize: 18, fontWeight: '600', color: '#2d6a4f' },
+  plantSpecies: { fontSize: 14, color: '#888', marginTop: 4, fontStyle: 'italic' },
+  addButton: {
     position: 'absolute',
+    bottom: 30,
+    right: 20,
+    backgroundColor: '#2d6a4f',
+    borderRadius: 30,
+    paddingVertical: 16,
+    paddingHorizontal: 28,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
   },
-});
+  addButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+})

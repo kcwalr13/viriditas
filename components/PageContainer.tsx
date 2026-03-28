@@ -40,6 +40,6 @@ const styles = StyleSheet.create({
   inner: {
     flex: 1,
     width: '100%',
-    maxWidth: 600,          // comfortable reading width on desktop
+    maxWidth: 800,          // comfortable reading width on desktop
   },
 })

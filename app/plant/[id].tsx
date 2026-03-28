@@ -538,9 +538,9 @@ export default function PlantDetailScreen() {
 
   return (
     <PageContainer>
-    // KeyboardAvoidingView shifts the screen content up when the keyboard opens
-    // so the focused input is never hidden behind it.
-    // behavior="padding" works best on iOS; "height" works best on Android.
+    {/* KeyboardAvoidingView shifts the screen content up when the keyboard opens
+        so the focused input is never hidden behind it.
+        behavior="padding" works best on iOS; "height" works best on Android. */}
     <KeyboardAvoidingView
       style={{ flex: 1 }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -549,6 +549,7 @@ export default function PlantDetailScreen() {
       style={styles.container}
       contentContainerStyle={{ paddingBottom: 120 }}
       keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
     >
       <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
         <Text style={styles.backText}>← My Plants</Text>

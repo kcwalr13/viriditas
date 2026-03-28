@@ -465,10 +465,13 @@ export default function PlantDetailScreen() {
       Alert.alert('Error', 'Could not read image data.')
       return
     }
-    await uploadPhoto(asset.base64)
+    // Pass the actual MIME type from the picker so we store the correct content-type
+    // in Supabase. Without this, everything gets labelled image/jpeg even if the
+    // browser provided a WebP file, which causes the Claude API to reject the image.
+    await uploadPhoto(asset.base64, asset.mimeType ?? 'image/jpeg')
   }
 
-  async function uploadPhoto(base64: string) {
+  async function uploadPhoto(base64: string, mimeType: string = 'image/jpeg') {
     setUploading(true)
     try {
       const { data: { user } } = await supabase.auth.getUser()
@@ -480,11 +483,16 @@ export default function PlantDetailScreen() {
         bytes[i] = binaryString.charCodeAt(i)
       }
 
-      const path = `${user!.id}/${id}/${Date.now()}.jpg`
+      // Use the real extension based on the actual MIME type
+      const ext = mimeType === 'image/webp' ? 'webp'
+                : mimeType === 'image/png'  ? 'png'
+                : mimeType === 'image/gif'  ? 'gif'
+                : 'jpg'
+      const path = `${user!.id}/${id}/${Date.now()}.${ext}`
 
       const { error: uploadError } = await supabase.storage
         .from('plant-photos')
-        .upload(path, bytes.buffer, { contentType: 'image/jpeg' })
+        .upload(path, bytes.buffer, { contentType: mimeType })
 
       if (uploadError) throw uploadError
 

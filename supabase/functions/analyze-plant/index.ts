@@ -111,9 +111,40 @@ Only respond with the JSON object. No extra text.${speciesSection}${historySecti
 // Supported image media types for both Claude and Gemini
 type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
 
-// Fetch an image from a URL and return it as a base64 string plus its media type.
-// Detecting the real media type is important — browsers commonly upload WebP,
-// and the Claude API will reject the request if the declared type doesn't match.
+// Detect the real image format by inspecting the first few bytes of the file.
+// Every image format has a unique "magic byte" signature at the start.
+// This is more reliable than trusting the Content-Type header, which can be
+// wrong if the file was uploaded with an incorrect type (e.g., a WebP saved as .jpg).
+function detectMediaType(bytes: Uint8Array): ImageMediaType {
+  // WebP: starts with "RIFF" (52 49 46 46), then 4 size bytes, then "WEBP" (57 45 42 50)
+  if (
+    bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
+  ) return 'image/webp'
+
+  // PNG: starts with \x89PNG\r\n\x1a\n
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) {
+    return 'image/png'
+  }
+
+  // GIF: starts with "GIF8"
+  if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) {
+    return 'image/gif'
+  }
+
+  // JPEG: starts with \xFF\xD8\xFF
+  if (bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) {
+    return 'image/jpeg'
+  }
+
+  // Default to jpeg if unrecognised
+  return 'image/jpeg'
+}
+
+// Fetch an image from a URL and return it as a base64 string plus its real media type.
+// We detect the type from the actual bytes rather than the Content-Type header, because
+// Supabase Storage may serve files with an incorrect content-type if they were uploaded
+// with the wrong one (e.g., a WebP file uploaded with contentType: 'image/jpeg').
 async function fetchImageAsBase64(imageUrl: string): Promise<{ base64: string; mediaType: ImageMediaType }> {
   const response = await fetch(imageUrl)
   if (!response.ok) {
@@ -121,21 +152,14 @@ async function fetchImageAsBase64(imageUrl: string): Promise<{ base64: string; m
   }
 
   const arrayBuffer = await response.arrayBuffer()
+  const bytes = new Uint8Array(arrayBuffer)
   const base64 = encodeBase64(arrayBuffer)
 
-  // Read the actual content type from the response headers.
-  // Fall back to inspecting the URL extension, then default to jpeg.
-  const contentType = response.headers.get('content-type') ?? ''
-  let mediaType: ImageMediaType = 'image/jpeg'
-  if (contentType.includes('webp')) mediaType = 'image/webp'
-  else if (contentType.includes('png')) mediaType = 'image/png'
-  else if (contentType.includes('gif')) mediaType = 'image/gif'
-  else if (contentType.includes('jpeg') || contentType.includes('jpg')) mediaType = 'image/jpeg'
-  else if (imageUrl.endsWith('.webp')) mediaType = 'image/webp'
-  else if (imageUrl.endsWith('.png')) mediaType = 'image/png'
-  else if (imageUrl.endsWith('.gif')) mediaType = 'image/gif'
+  // Detect format from magic bytes — immune to wrong Content-Type headers
+  const mediaType = detectMediaType(bytes)
+  const headerType = response.headers.get('content-type') ?? 'unknown'
+  console.log(`Fetched image — header content-type: ${headerType}, detected media type: ${mediaType}`)
 
-  console.log(`Fetched image — content-type: ${contentType}, resolved media type: ${mediaType}`)
   return { base64, mediaType }
 }
 

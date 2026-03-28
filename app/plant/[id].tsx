@@ -1,6 +1,6 @@
 // app/plant/[id].tsx
-// Shows the details of a single plant.
-// Supports viewing photos, adding photos, AI analysis with history, editing, and deleting.
+// Plant detail screen — rich profile for a single plant.
+// Three-tab layout: Overview, History, and Species Guide.
 import { useState, useEffect, useCallback } from 'react'
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
@@ -19,19 +19,28 @@ import PageContainer from '@/components/PageContainer'
 // Notification IDs are device-specific so they live on-device, not in Supabase.
 const reminderKey = (plantId: string) => `viriditas_reminder_${plantId}`
 
-// Interval options shown to the user as quick-pick chips
+// Interval options shown as quick-pick chips in the reminder section
 const REMINDER_OPTIONS = [
-  { label: 'Every 3 days', days: 3 },
-  { label: 'Every 5 days', days: 5 },
-  { label: 'Every 7 days', days: 7 },
-  { label: 'Every 10 days', days: 10 },
-  { label: 'Every 14 days', days: 14 },
+  { label: '3 days', days: 3 },
+  { label: '5 days', days: 5 },
+  { label: '7 days', days: 7 },
+  { label: '10 days', days: 10 },
+  { label: '14 days', days: 14 },
 ]
+
+type Tab = 'overview' | 'history' | 'species'
+
+// A unified timeline entry merging care logs and analysis results by date.
+// Used in the History tab to give a single chronological view of the plant's life.
+type TimelineItem =
+  | { kind: 'care'; id: string; date: string; data: CareLog }
+  | { kind: 'analysis'; id: string; date: string; data: AnalysisResult }
 
 export default function PlantDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const router = useRouter()
 
+  // ── Core data state ────────────────────────────────────────────────────────
   const [plant, setPlant] = useState<Plant | null>(null)
   const [photos, setPhotos] = useState<PlantPhoto[]>([])
   const [photoUrls, setPhotoUrls] = useState<Record<string, string>>({})
@@ -40,36 +49,34 @@ export default function PlantDetailScreen() {
   const [editing, setEditing] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  // AI analysis state
+  // Which tab is currently active
+  const [activeTab, setActiveTab] = useState<Tab>('overview')
+
+  // AI analysis
   const [analyzing, setAnalyzing] = useState(false)
   const [latestAnalysis, setLatestAnalysis] = useState<AnalysisResult | null>(null)
   const [analysisHistory, setAnalysisHistory] = useState<AnalysisResult[]>([])
-  const [historyExpanded, setHistoryExpanded] = useState(false)
 
   // Species profile — encyclopedic reference data fetched once per species and cached
   const [speciesProfile, setSpeciesProfile] = useState<SpeciesProfile | null>(null)
   const [fetchingSpeciesProfile, setFetchingSpeciesProfile] = useState(false)
-  const [speciesProfileExpanded, setSpeciesProfileExpanded] = useState(false)
 
-  // Reminder state — tracks the currently saved interval (in days) for this plant
+  // Watering reminder — interval stored in Supabase, notification ID stored on-device
   const [reminderDays, setReminderDays] = useState<number | null>(null)
   const [savingReminder, setSavingReminder] = useState(false)
 
-  // Care log state
+  // Care logs
   const [careLogs, setCareLogs] = useState<CareLog[]>([])
   const [loggingCare, setLoggingCare] = useState(false)
-  const [careLogsExpanded, setCareLogsExpanded] = useState(false)
-  // When adding a custom note, we show a small inline input
   const [showNoteInput, setShowNoteInput] = useState(false)
   const [noteText, setNoteText] = useState('')
 
-  // Edit form fields — pre-filled when editing starts
+  // Edit form — pre-filled when editing starts
   const [nickname, setNickname] = useState('')
   const [species, setSpecies] = useState('')
   const [notes, setNotes] = useState('')
 
-  // useFocusEffect re-runs fetchPlant and fetchPhotos every time the screen
-  // comes into focus (e.g. navigating back from another screen)
+  // Reload all data every time the screen comes into focus
   useFocusEffect(
     useCallback(() => {
       fetchPlant()
@@ -79,13 +86,14 @@ export default function PlantDetailScreen() {
     }, [id])
   )
 
-  // When we learn what species the plant is (either from DB on load or after analysis),
-  // check if we already have a cached species profile for it.
+  // When we know the species (from DB or after analysis), load the cached profile
   useEffect(() => {
     if (plant?.species) {
       fetchSpeciesProfileFromDB(plant.species)
     }
   }, [plant?.species])
+
+  // ── Data fetching ──────────────────────────────────────────────────────────
 
   async function fetchPlant() {
     const { data, error } = await supabase
@@ -112,7 +120,7 @@ export default function PlantDetailScreen() {
       .from('photos')
       .select('*')
       .eq('plant_id', id)
-      .order('created_at', { ascending: false }) // Newest photos first
+      .order('created_at', { ascending: false }) // Newest first
 
     if (!error && data) {
       setPhotos(data)
@@ -133,21 +141,18 @@ export default function PlantDetailScreen() {
       .from('analysis_results')
       .select('*')
       .eq('plant_id', id)
-      .order('created_at', { ascending: false }) // Newest first
+      .order('created_at', { ascending: false })
 
     if (!error && data && data.length > 0) {
-      setLatestAnalysis(data[0])          // Most recent — shown in the main card
-      setAnalysisHistory(data.slice(1))   // The rest — shown in collapsible history
+      setLatestAnalysis(data[0])        // Most recent — shown in the Overview tab
+      setAnalysisHistory(data.slice(1)) // The rest — shown in the History tab
     } else {
       setLatestAnalysis(null)
       setAnalysisHistory([])
     }
   }
 
-  // ── Species Profile ────────────────────────────────────────────────────────
-
-  // Check the local DB for a cached species profile. This is a fast, free lookup —
-  // no AI call needed if we've already fetched this species before.
+  // Check the local DB for a cached species profile — fast, free, no AI call needed
   async function fetchSpeciesProfileFromDB(speciesName: string) {
     const { data, error } = await supabase
       .from('species_profiles')
@@ -155,13 +160,10 @@ export default function PlantDetailScreen() {
       .eq('species_name', speciesName)
       .single()
 
-    if (!error && data) {
-      setSpeciesProfile(data)
-    }
+    if (!error && data) setSpeciesProfile(data)
   }
 
-  // Call the fetch-species-info Edge Function to get (or create) a species profile.
-  // The Edge Function checks its own cache first; only calls the AI if needed.
+  // Call the fetch-species-info Edge Function to get or create a species profile.
   // Pass forceRefresh: true to bypass the cache and regenerate the profile.
   async function fetchSpeciesProfileFromAI(speciesName: string, forceRefresh = false) {
     setFetchingSpeciesProfile(true)
@@ -176,10 +178,7 @@ export default function PlantDetailScreen() {
 
       if (error) throw new Error(error.message)
       if (data?.error) throw new Error(data.error)
-
-      if (data?.profile) {
-        setSpeciesProfile(data.profile)
-      }
+      if (data?.profile) setSpeciesProfile(data.profile)
     } catch (err: any) {
       Alert.alert('Species info unavailable', err.message || 'Could not fetch species info.')
     } finally {
@@ -187,80 +186,65 @@ export default function PlantDetailScreen() {
     }
   }
 
-  // ── Reminders ─────────────────────────────────────────────────────────────
-
-  // Set or update a watering reminder for this plant.
-  // Cancels any existing notification, schedules a new repeating one,
-  // saves the interval to Supabase, and stores the notification ID locally.
-  async function setReminder(days: number) {
-    setSavingReminder(true)
-    try {
-      // Cancel any existing notification for this plant first
-      const existingId = await AsyncStorage.getItem(reminderKey(id))
-      if (existingId) {
-        await cancelNotification(existingId)
-      }
-
-      // Schedule a new repeating notification via our safe wrapper
-      const notificationId = await scheduleWateringReminder(
-        plant?.nickname ?? 'Your plant',
-        days
-      )
-
-      // Save the notification ID on-device so we can cancel it later
-      if (notificationId) {
-        await AsyncStorage.setItem(reminderKey(id), notificationId)
-      }
-
-      // Save the interval preference to Supabase for display and persistence
-      await supabase.from('plants').update({ watering_interval_days: days }).eq('id', id)
-
-      setReminderDays(days)
-    } catch (error: any) {
-      Alert.alert('Error', 'Could not set reminder. Please try again.')
-    } finally {
-      setSavingReminder(false)
-    }
-  }
-
-  // Remove the watering reminder for this plant entirely.
-  async function removeReminder() {
-    setSavingReminder(true)
-    try {
-      // Cancel the scheduled notification if one exists
-      const existingId = await AsyncStorage.getItem(reminderKey(id))
-      if (existingId) {
-        await cancelNotification(existingId)
-        await AsyncStorage.removeItem(reminderKey(id))
-      }
-
-      // Clear the interval from Supabase
-      await supabase.from('plants').update({ watering_interval_days: null }).eq('id', id)
-
-      setReminderDays(null)
-    } catch (error: any) {
-      Alert.alert('Error', 'Could not remove reminder.')
-    } finally {
-      setSavingReminder(false)
-    }
-  }
-
-  // ── Care Logs ──────────────────────────────────────────────────────────────
-
   async function fetchCareLogs() {
     const { data, error } = await supabase
       .from('care_logs')
       .select('*')
       .eq('plant_id', id)
       .order('logged_at', { ascending: false })
-      .limit(20) // Show the 20 most recent events
+      .limit(50)
 
     if (!error && data) setCareLogs(data)
   }
 
-  // Log a care event. type is 'watered', 'fertilized', or 'note'.
-  // For 'watered' and 'fertilized', notes is optional.
-  // For 'note', the notes field holds the custom text.
+  // ── Reminders ──────────────────────────────────────────────────────────────
+
+  async function setReminder(days: number) {
+    setSavingReminder(true)
+    try {
+      // Cancel any existing notification first
+      const existingId = await AsyncStorage.getItem(reminderKey(id))
+      if (existingId) await cancelNotification(existingId)
+
+      // Schedule the new repeating notification via our safe wrapper
+      const notificationId = await scheduleWateringReminder(
+        plant?.nickname ?? 'Your plant',
+        days
+      )
+      if (notificationId) {
+        await AsyncStorage.setItem(reminderKey(id), notificationId)
+      }
+
+      // Persist the interval to Supabase so it shows in the UI across devices
+      await supabase.from('plants').update({ watering_interval_days: days }).eq('id', id)
+      setReminderDays(days)
+    } catch {
+      Alert.alert('Error', 'Could not set reminder. Please try again.')
+    } finally {
+      setSavingReminder(false)
+    }
+  }
+
+  async function removeReminder() {
+    setSavingReminder(true)
+    try {
+      const existingId = await AsyncStorage.getItem(reminderKey(id))
+      if (existingId) {
+        await cancelNotification(existingId)
+        await AsyncStorage.removeItem(reminderKey(id))
+      }
+      await supabase.from('plants').update({ watering_interval_days: null }).eq('id', id)
+      setReminderDays(null)
+    } catch {
+      Alert.alert('Error', 'Could not remove reminder.')
+    } finally {
+      setSavingReminder(false)
+    }
+  }
+
+  // ── Care logs ──────────────────────────────────────────────────────────────
+
+  // Log a care event — type is 'watered', 'fertilized', or 'note'
   async function logCare(type: CareLog['type'], customNote?: string) {
     setLoggingCare(true)
     try {
@@ -272,8 +256,8 @@ export default function PlantDetailScreen() {
         notes: customNote ?? null,
       })
       if (error) throw error
-      await fetchCareLogs() // Refresh the list
-    } catch (error: any) {
+      await fetchCareLogs()
+    } catch {
       Alert.alert('Error', 'Could not save care log.')
     } finally {
       setLoggingCare(false)
@@ -287,15 +271,6 @@ export default function PlantDetailScreen() {
     setShowNoteInput(false)
   }
 
-  // Returns a readable label and emoji for each care type
-  function careLabel(type: CareLog['type']) {
-    switch (type) {
-      case 'watered':    return '💧 Watered'
-      case 'fertilized': return '🌿 Fertilized'
-      case 'note':       return '📝 Note'
-    }
-  }
-
   // ── AI Analysis ────────────────────────────────────────────────────────────
 
   async function handleAnalyze() {
@@ -305,13 +280,11 @@ export default function PlantDetailScreen() {
     }
 
     setAnalyzing(true)
-
     try {
       const latestPhoto = photos[0]
       const imageUrl = photoUrls[latestPhoto.id]
 
-      // Fetch the most recent analyses to send as context — we use the last 3
-      // so Claude can describe progress over time without sending too much data
+      // Fetch up to 3 past analyses to send as context — lets Claude comment on progress
       const { data: historyData } = await supabase
         .from('analysis_results')
         .select('species, health, care, created_at')
@@ -319,7 +292,6 @@ export default function PlantDetailScreen() {
         .order('created_at', { ascending: false })
         .limit(3)
 
-      // Format previous analyses as a compact summary for the AI prompt
       const previousAnalyses = (historyData ?? []).map((r: any) => ({
         date: new Date(r.created_at).toLocaleDateString(),
         species: r.species,
@@ -327,8 +299,7 @@ export default function PlantDetailScreen() {
         care: r.care,
       }))
 
-      // Also fetch recent care logs so the AI knows what care the plant has
-      // received — e.g. "watered 2 days ago, fertilized last week"
+      // Fetch recent care logs so the AI knows what care the plant has received
       const { data: careData } = await supabase
         .from('care_logs')
         .select('type, notes, logged_at')
@@ -342,8 +313,8 @@ export default function PlantDetailScreen() {
         date: new Date(l.logged_at).toLocaleDateString(),
       }))
 
-      // Get session token — supabase.functions.invoke doesn't reliably inject
-      // the auth token in React Native, so we pass it explicitly
+      // supabase.functions.invoke doesn't reliably inject the auth token in React Native,
+      // so we fetch the session and pass the token explicitly
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) throw new Error('Not logged in')
 
@@ -352,16 +323,13 @@ export default function PlantDetailScreen() {
           imageUrl,
           previousAnalyses,
           recentCareLogs,
-          // Pass the cached species profile so the AI knows ideal conditions up front
-          speciesProfile: speciesProfile ?? null,
+          speciesProfile: speciesProfile ?? null, // Species context makes the analysis smarter
         },
         headers: { Authorization: `Bearer ${session.access_token}` },
       })
 
       if (error) {
-        // Log the full error object so it's visible in browser DevTools if needed
         console.error('[Analyze] Edge Function error:', error)
-        // Try to extract a more specific message from the response body
         let message = error.message || 'Edge Function call failed'
         try {
           const body = await (error as any).context?.json?.()
@@ -380,7 +348,7 @@ export default function PlantDetailScreen() {
 
       const result = data.result
 
-      // Save the analysis result to the database so it becomes part of history
+      // Save the result to the DB so it becomes part of the plant's history
       const { data: { user } } = await supabase.auth.getUser()
       await supabase.from('analysis_results').insert({
         plant_id: id,
@@ -391,15 +359,12 @@ export default function PlantDetailScreen() {
         care: result.care,
       })
 
-      // If a species was identified and we don't have a profile yet, fetch one.
-      // This happens in the background after the main analysis completes.
+      // If a species was identified and we don't have a profile yet, fetch one in the background
       if (result.species && !speciesProfile) {
         fetchSpeciesProfileFromAI(result.species)
       }
 
-      // Refresh the history section to show the new result
       await fetchAnalysisHistory()
-
     } catch (error: any) {
       console.error('[Analyze] Caught error:', error)
       Alert.alert('Analysis failed', error.message || 'Something went wrong. Please try again.')
@@ -413,12 +378,10 @@ export default function PlantDetailScreen() {
   function handleAddPhoto() {
     // On web, Alert.alert doesn't support custom buttons — the browser's native
     // alert() ignores the buttons array. Skip straight to the file picker instead.
-    // Camera isn't available on web either, so the library is the only option.
     if (Platform.OS === 'web') {
       pickImage('library')
       return
     }
-
     Alert.alert('Add Photo', 'Where would you like to get the photo?', [
       { text: 'Take Photo', onPress: () => pickImage('camera') },
       { text: 'Choose from Library', onPress: () => pickImage('library') },
@@ -448,7 +411,6 @@ export default function PlantDetailScreen() {
       }
       result = await ImagePicker.launchCameraAsync(pickerOptions)
     } else {
-      // Permission requests are native-only — browsers prompt automatically
       if (Platform.OS !== 'web') {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync()
         if (status !== 'granted') {
@@ -465,9 +427,9 @@ export default function PlantDetailScreen() {
       Alert.alert('Error', 'Could not read image data.')
       return
     }
-    // Pass the actual MIME type from the picker so we store the correct content-type
-    // in Supabase. Without this, everything gets labelled image/jpeg even if the
-    // browser provided a WebP file, which causes the Claude API to reject the image.
+    // Pass the actual MIME type so Supabase stores the correct content-type.
+    // Without this, WebP images uploaded from browsers get labelled image/jpeg,
+    // which causes the Claude API to reject them during analysis.
     await uploadPhoto(asset.base64, asset.mimeType ?? 'image/jpeg')
   }
 
@@ -476,14 +438,15 @@ export default function PlantDetailScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser()
 
-      // Convert base64 → binary → Uint8Array → ArrayBuffer for upload
+      // Convert base64 → binary → Uint8Array → ArrayBuffer for upload.
+      // React Native's Blob doesn't support .arrayBuffer(), so we do this manually.
       const binaryString = atob(base64)
       const bytes = new Uint8Array(binaryString.length)
       for (let i = 0; i < binaryString.length; i++) {
         bytes[i] = binaryString.charCodeAt(i)
       }
 
-      // Use the real extension based on the actual MIME type
+      // Use the correct file extension based on the actual MIME type
       const ext = mimeType === 'image/webp' ? 'webp'
                 : mimeType === 'image/png'  ? 'png'
                 : mimeType === 'image/gif'  ? 'gif'
@@ -558,325 +521,112 @@ export default function PlantDetailScreen() {
 
   // ── Helpers ────────────────────────────────────────────────────────────────
 
-  // Format a date string like "Mar 27, 2026"
   function formatDate(dateStr: string) {
     return new Date(dateStr).toLocaleDateString(undefined, {
       month: 'short', day: 'numeric', year: 'numeric',
     })
   }
 
+  function careLabel(type: CareLog['type']) {
+    switch (type) {
+      case 'watered':    return '💧 Watered'
+      case 'fertilized': return '🌿 Fertilized'
+      case 'note':       return '📝 Note'
+    }
+  }
+
+  // Merge care logs and analyses into one sorted timeline for the History tab
+  function buildTimeline(): TimelineItem[] {
+    const allAnalyses = latestAnalysis
+      ? [latestAnalysis, ...analysisHistory]
+      : analysisHistory
+
+    const items: TimelineItem[] = [
+      ...careLogs.map(log => ({
+        kind: 'care' as const,
+        id: log.id,
+        date: log.logged_at,
+        data: log,
+      })),
+      ...allAnalyses.map(a => ({
+        kind: 'analysis' as const,
+        id: a.id,
+        date: a.created_at,
+        data: a,
+      })),
+    ]
+
+    // Sort newest first
+    return items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
   if (loading) {
     return <View style={styles.centered}><ActivityIndicator size="large" color="#2d6a4f" /></View>
   }
 
-  return (
-    <PageContainer>
-    {/* KeyboardAvoidingView shifts the screen content up when the keyboard opens
-        so the focused input is never hidden behind it.
-        behavior="padding" works best on iOS; "height" works best on Android. */}
-    <KeyboardAvoidingView
-      style={{ flex: 1 }}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={{ paddingBottom: 120 }}
-      keyboardShouldPersistTaps="handled"
-      showsVerticalScrollIndicator={false}
-    >
-      <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-        <Text style={styles.backText}>← My Plants</Text>
-      </TouchableOpacity>
+  // ── Sub-renderers — defined before return so JSX can call them ─────────────
 
-      {/* ── Photo gallery ── */}
-      <View style={styles.photosSection}>
-        {photos.length > 0 ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoScroll}>
-            {photos.map((photo) => (
-              <Image
-                key={photo.id}
-                source={{ uri: photoUrls[photo.id] }}
-                style={styles.photoThumb}
-                contentFit="cover"
-              />
-            ))}
-          </ScrollView>
-        ) : (
-          <View style={styles.noPhotos}>
-            <Text style={styles.noPhotosText}>No photos yet</Text>
-          </View>
-        )}
-
-        <TouchableOpacity
-          style={[styles.addPhotoButton, uploading && styles.disabledButton]}
-          onPress={handleAddPhoto}
-          disabled={uploading}
-        >
-          {uploading
-            ? <ActivityIndicator color="#2d6a4f" size="small" />
-            : <Text style={styles.addPhotoText}>+ Add Photo</Text>
-          }
-        </TouchableOpacity>
-      </View>
-
-      {/* ── Analyze button ── */}
-      {photos.length > 0 && (
-        <TouchableOpacity
-          style={[styles.analyzeButton, analyzing && styles.disabledButton]}
-          onPress={handleAnalyze}
-          disabled={analyzing}
-        >
-          {analyzing ? (
-            <View style={styles.analyzeButtonInner}>
-              <ActivityIndicator color="#fff" size="small" style={{ marginRight: 8 }} />
-              <Text style={styles.analyzeButtonText}>Analyzing...</Text>
-            </View>
+  function renderOverview() {
+    return (
+      <>
+        {/* Full-width hero photo — the most recent photo fills the top of the tab */}
+        <View style={styles.heroSection}>
+          {photos.length > 0 ? (
+            <Image
+              source={{ uri: photoUrls[photos[0].id] }}
+              style={styles.heroImage}
+              contentFit="cover"
+            />
           ) : (
-            <Text style={styles.analyzeButtonText}>
-              {latestAnalysis ? '🔍 Re-analyze Plant' : '🔍 Analyze Plant'}
-            </Text>
-          )}
-        </TouchableOpacity>
-      )}
-
-      {/* ── Latest analysis result ── */}
-      {latestAnalysis && (
-        <View style={styles.analysisCard}>
-          <View style={styles.analysisCardHeader}>
-            <Text style={styles.analysisTitle}>Latest Analysis</Text>
-            <Text style={styles.analysisDate}>{formatDate(latestAnalysis.created_at)}</Text>
-          </View>
-
-          <View style={styles.analysisSection}>
-            <Text style={styles.analysisSectionLabel}>🌿 SPECIES</Text>
-            <Text style={styles.analysisSectionText}>{latestAnalysis.species}</Text>
-          </View>
-
-          <View style={styles.analysisSection}>
-            <Text style={styles.analysisSectionLabel}>❤️ HEALTH</Text>
-            <Text style={styles.analysisSectionText}>{latestAnalysis.health}</Text>
-          </View>
-
-          <View style={styles.analysisSection}>
-            <Text style={styles.analysisSectionLabel}>💧 CARE TIPS</Text>
-            <Text style={styles.analysisSectionText}>{latestAnalysis.care}</Text>
-          </View>
-
-          <Text style={styles.analysisDisclaimer}>
-            AI-generated — use as guidance only.
-          </Text>
-        </View>
-      )}
-
-      {/* ── Analysis history ── */}
-      {analysisHistory.length > 0 && (
-        <View style={styles.historySection}>
-          <TouchableOpacity
-            style={styles.historyToggle}
-            onPress={() => setHistoryExpanded(!historyExpanded)}
-          >
-            <Text style={styles.historyToggleText}>
-              {historyExpanded ? '▾' : '▸'} Analysis History ({analysisHistory.length} previous)
-            </Text>
-          </TouchableOpacity>
-
-          {historyExpanded && analysisHistory.map((entry, index) => (
-            <View key={entry.id} style={styles.historyEntry}>
-              <Text style={styles.historyDate}>{formatDate(entry.created_at)}</Text>
-
-              {entry.species && (
-                <>
-                  <Text style={styles.analysisSectionLabel}>🌿 SPECIES</Text>
-                  <Text style={styles.historyText}>{entry.species}</Text>
-                </>
-              )}
-              {entry.health && (
-                <>
-                  <Text style={[styles.analysisSectionLabel, { marginTop: 10 }]}>❤️ HEALTH</Text>
-                  <Text style={styles.historyText}>{entry.health}</Text>
-                </>
-              )}
-              {entry.care && (
-                <>
-                  <Text style={[styles.analysisSectionLabel, { marginTop: 10 }]}>💧 CARE TIPS</Text>
-                  <Text style={styles.historyText}>{entry.care}</Text>
-                </>
-              )}
-
-              {/* Divider between entries, but not after the last one */}
-              {index < analysisHistory.length - 1 && <View style={styles.historyDivider} />}
+            <View style={styles.heroPlaceholder}>
+              <Text style={styles.heroPlaceholderIcon}>🌿</Text>
+              <Text style={styles.heroPlaceholderText}>No photos yet</Text>
             </View>
-          ))}
-        </View>
-      )}
-
-      {/* ── Species profile ── */}
-      <View style={styles.speciesProfileSection}>
-        <View style={styles.speciesProfileHeader}>
-          <Text style={styles.sectionTitle}>📖 Species Profile</Text>
-          {speciesProfile && (
-            <TouchableOpacity
-              onPress={() => fetchSpeciesProfileFromAI(speciesProfile.species_name, true)}
-              disabled={fetchingSpeciesProfile}
-            >
-              <Text style={styles.refreshText}>
-                {fetchingSpeciesProfile ? 'Refreshing...' : 'Refresh'}
-              </Text>
-            </TouchableOpacity>
           )}
         </View>
 
-        {fetchingSpeciesProfile && !speciesProfile ? (
-          // Loading from scratch — show spinner
-          <View style={styles.speciesProfileLoading}>
-            <ActivityIndicator size="small" color="#2d6a4f" />
-            <Text style={styles.speciesProfileLoadingText}>Fetching species info...</Text>
-          </View>
-        ) : speciesProfile ? (
-          // We have a profile — show it in a collapsible card
-          <View style={styles.speciesProfileCard}>
-            {speciesProfile.common_names && (
-              <View style={styles.speciesProfileRow}>
-                <Text style={styles.speciesProfileLabel}>COMMON NAMES</Text>
-                <Text style={styles.speciesProfileValue}>{speciesProfile.common_names}</Text>
-              </View>
-            )}
-            {speciesProfile.scientific_name && (
-              <View style={styles.speciesProfileRow}>
-                <Text style={styles.speciesProfileLabel}>SCIENTIFIC NAME</Text>
-                <Text style={[styles.speciesProfileValue, { fontStyle: 'italic' }]}>
-                  {speciesProfile.scientific_name}
-                </Text>
-              </View>
-            )}
-
-            {/* Toggle button for the detailed care fields */}
-            <TouchableOpacity
-              style={styles.speciesProfileToggle}
-              onPress={() => setSpeciesProfileExpanded(!speciesProfileExpanded)}
-            >
-              <Text style={styles.speciesProfileToggleText}>
-                {speciesProfileExpanded ? '▾ Hide care details' : '▸ Show care details'}
-              </Text>
-            </TouchableOpacity>
-
-            {speciesProfileExpanded && (
-              <>
-                {[
-                  { label: '☀️ LIGHT', value: speciesProfile.light },
-                  { label: '💧 WATERING', value: speciesProfile.watering },
-                  { label: '💨 HUMIDITY', value: speciesProfile.humidity },
-                  { label: '🌡️ TEMPERATURE', value: speciesProfile.temperature },
-                  { label: '🪴 SOIL', value: speciesProfile.soil },
-                  { label: '⚠️ TOXICITY', value: speciesProfile.toxicity },
-                  { label: '🐛 COMMON PROBLEMS', value: speciesProfile.common_problems },
-                  { label: '🌱 GROWTH HABITS', value: speciesProfile.growth_habits },
-                  { label: '✂️ PROPAGATION', value: speciesProfile.propagation },
-                ].filter(item => item.value).map(item => (
-                  <View key={item.label} style={styles.speciesProfileRow}>
-                    <Text style={styles.speciesProfileLabel}>{item.label}</Text>
-                    <Text style={styles.speciesProfileValue}>{item.value}</Text>
-                  </View>
-                ))}
-              </>
-            )}
-          </View>
-        ) : plant?.species ? (
-          // Species is known but no profile fetched yet — offer to load it
+        {/* Quick-action bar — four primary actions always visible without scrolling */}
+        <View style={styles.quickActions}>
           <TouchableOpacity
-            style={styles.speciesProfileFetchButton}
-            onPress={() => fetchSpeciesProfileFromAI(plant.species!)}
-            disabled={fetchingSpeciesProfile}
-          >
-            <Text style={styles.speciesProfileFetchText}>
-              Load species info for {plant.species}
-            </Text>
-          </TouchableOpacity>
-        ) : (
-          // No species identified yet
-          <Text style={styles.speciesProfileEmptyText}>
-            Analyze your plant to identify its species and unlock the full species profile.
-          </Text>
-        )}
-      </View>
-
-      {/* ── Watering reminder ── */}
-      <View style={styles.reminderSection}>
-        <Text style={styles.sectionTitle}>Watering Reminder</Text>
-
-        {reminderDays ? (
-          // Reminder is active — show current interval and a remove button
-          <View style={styles.reminderActive}>
-            <Text style={styles.reminderActiveText}>
-              💧 Reminder set: every {reminderDays} days
-            </Text>
-            <TouchableOpacity
-              onPress={removeReminder}
-              disabled={savingReminder}
-              style={styles.reminderRemoveButton}
-            >
-              <Text style={styles.reminderRemoveText}>Remove</Text>
-            </TouchableOpacity>
-          </View>
-        ) : (
-          <Text style={styles.reminderNoneText}>No reminder set</Text>
-        )}
-
-        {/* Quick-pick interval chips */}
-        <View style={styles.reminderChips}>
-          {REMINDER_OPTIONS.map((option) => (
-            <TouchableOpacity
-              key={option.days}
-              style={[
-                styles.reminderChip,
-                reminderDays === option.days && styles.reminderChipActive,
-              ]}
-              onPress={() => setReminder(option.days)}
-              disabled={savingReminder}
-            >
-              <Text style={[
-                styles.reminderChipText,
-                reminderDays === option.days && styles.reminderChipTextActive,
-              ]}>
-                {option.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
-
-      {/* ── Care logging ── */}
-      <View style={styles.careSection}>
-        <Text style={styles.sectionTitle}>Log Care</Text>
-
-        {/* Quick-tap buttons for the two most common actions */}
-        <View style={styles.careButtons}>
-          <TouchableOpacity
-            style={[styles.careButton, loggingCare && styles.disabledButton]}
+            style={[styles.quickAction, loggingCare && styles.disabledButton]}
             onPress={() => logCare('watered')}
             disabled={loggingCare}
           >
-            <Text style={styles.careButtonText}>💧 Watered</Text>
+            <Text style={styles.quickActionIcon}>💧</Text>
+            <Text style={styles.quickActionLabel}>Watered</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.careButton, loggingCare && styles.disabledButton]}
+            style={[styles.quickAction, loggingCare && styles.disabledButton]}
             onPress={() => logCare('fertilized')}
             disabled={loggingCare}
           >
-            <Text style={styles.careButtonText}>🌿 Fertilized</Text>
+            <Text style={styles.quickActionIcon}>🌿</Text>
+            <Text style={styles.quickActionLabel}>Fertilized</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.careButton, loggingCare && styles.disabledButton]}
+            style={[styles.quickAction, loggingCare && styles.disabledButton]}
             onPress={() => setShowNoteInput(!showNoteInput)}
             disabled={loggingCare}
           >
-            <Text style={styles.careButtonText}>📝 Note</Text>
+            <Text style={styles.quickActionIcon}>📝</Text>
+            <Text style={styles.quickActionLabel}>Note</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.quickAction, uploading && styles.disabledButton]}
+            onPress={handleAddPhoto}
+            disabled={uploading}
+          >
+            <Text style={styles.quickActionIcon}>{uploading ? '⏳' : '📷'}</Text>
+            <Text style={styles.quickActionLabel}>{uploading ? 'Uploading' : 'Add Photo'}</Text>
           </TouchableOpacity>
         </View>
 
-        {/* Inline note input — shown when the Note button is tapped */}
+        {/* Inline note input — appears below the quick-action bar when Note is tapped */}
         {showNoteInput && (
           <View style={styles.noteInputRow}>
             <TextInput
@@ -898,286 +648,663 @@ export default function PlantDetailScreen() {
             </TouchableOpacity>
           </View>
         )}
-      </View>
 
-      {/* ── Care log history ── */}
-      {careLogs.length > 0 && (
-        <View style={styles.historySection}>
+        {/* AI analysis button */}
+        {photos.length > 0 && (
           <TouchableOpacity
-            style={styles.historyToggle}
-            onPress={() => setCareLogsExpanded(!careLogsExpanded)}
+            style={[styles.analyzeButton, analyzing && styles.disabledButton]}
+            onPress={handleAnalyze}
+            disabled={analyzing}
           >
-            <Text style={styles.historyToggleText}>
-              {careLogsExpanded ? '▾' : '▸'} Care History ({careLogs.length} events)
-            </Text>
-          </TouchableOpacity>
-
-          {careLogsExpanded && careLogs.map((log, index) => (
-            <View key={log.id} style={styles.careLogEntry}>
-              <View style={styles.careLogRow}>
-                <Text style={styles.careLogType}>{careLabel(log.type)}</Text>
-                <Text style={styles.careLogDate}>
-                  {new Date(log.logged_at).toLocaleDateString(undefined, {
-                    month: 'short', day: 'numeric', year: 'numeric',
-                  })}
-                </Text>
+            {analyzing ? (
+              <View style={styles.analyzeButtonInner}>
+                <ActivityIndicator color="#fff" size="small" style={{ marginRight: 8 }} />
+                <Text style={styles.analyzeButtonText}>Analyzing...</Text>
               </View>
-              {log.notes && (
-                <Text style={styles.careLogNote}>{log.notes}</Text>
-              )}
-              {index < careLogs.length - 1 && <View style={styles.historyDivider} />}
+            ) : (
+              <Text style={styles.analyzeButtonText}>
+                {latestAnalysis ? '🔍 Re-analyze Plant' : '🔍 Analyze Plant'}
+              </Text>
+            )}
+          </TouchableOpacity>
+        )}
+
+        {/* Latest analysis card */}
+        {latestAnalysis && (
+          <View style={styles.analysisCard}>
+            <View style={styles.analysisCardHeader}>
+              <Text style={styles.analysisTitle}>Latest Analysis</Text>
+              <Text style={styles.analysisDate}>{formatDate(latestAnalysis.created_at)}</Text>
             </View>
-          ))}
+            <View style={styles.analysisSection}>
+              <Text style={styles.analysisSectionLabel}>🌿 SPECIES</Text>
+              <Text style={styles.analysisSectionText}>{latestAnalysis.species}</Text>
+            </View>
+            <View style={styles.analysisSection}>
+              <Text style={styles.analysisSectionLabel}>❤️ HEALTH</Text>
+              <Text style={styles.analysisSectionText}>{latestAnalysis.health}</Text>
+            </View>
+            <View style={styles.analysisSection}>
+              <Text style={styles.analysisSectionLabel}>💧 CARE TIPS</Text>
+              <Text style={styles.analysisSectionText}>{latestAnalysis.care}</Text>
+            </View>
+            <Text style={styles.analysisDisclaimer}>AI-generated — use as guidance only.</Text>
+          </View>
+        )}
+
+        {/* Watering reminder */}
+        <View style={styles.reminderSection}>
+          <Text style={styles.sectionTitle}>Watering Reminder</Text>
+          {reminderDays ? (
+            <View style={styles.reminderActive}>
+              <Text style={styles.reminderActiveText}>💧 Every {reminderDays} days</Text>
+              <TouchableOpacity onPress={removeReminder} disabled={savingReminder}>
+                <Text style={styles.reminderRemoveText}>Remove</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <Text style={styles.reminderNoneText}>No reminder set</Text>
+          )}
+          <View style={styles.reminderChips}>
+            {REMINDER_OPTIONS.map(option => (
+              <TouchableOpacity
+                key={option.days}
+                style={[
+                  styles.reminderChip,
+                  reminderDays === option.days && styles.reminderChipActive,
+                ]}
+                onPress={() => setReminder(option.days)}
+                disabled={savingReminder}
+              >
+                <Text style={[
+                  styles.reminderChipText,
+                  reminderDays === option.days && styles.reminderChipTextActive,
+                ]}>
+                  {option.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </View>
-      )}
 
-      {/* ── Edit mode ── */}
-      {editing ? (
-        <>
-          <Text style={styles.header}>Edit Plant</Text>
-
-          <Text style={styles.label}>Nickname *</Text>
-          <TextInput style={styles.input} value={nickname} onChangeText={setNickname} placeholderTextColor="#aaa" />
-
-          <Text style={styles.label}>Species</Text>
-          <TextInput style={styles.input} value={species} onChangeText={setSpecies} placeholder="e.g. Monstera deliciosa" placeholderTextColor="#aaa" />
-
-          <Text style={styles.label}>Notes</Text>
-          <TextInput style={[styles.input, styles.textArea]} value={notes} onChangeText={setNotes} multiline numberOfLines={4} placeholderTextColor="#aaa" />
-
-          <TouchableOpacity style={[styles.button, saving && styles.disabledButton]} onPress={handleSave} disabled={saving}>
-            <Text style={styles.buttonText}>{saving ? 'Saving...' : 'Save Changes'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.cancelButton} onPress={() => setEditing(false)}>
-            <Text style={styles.cancelText}>Cancel</Text>
-          </TouchableOpacity>
-        </>
-      ) : (
-        // ── View mode ──
-        <>
-          <View style={styles.titleRow}>
-            <Text style={styles.header}>{plant?.nickname}</Text>
-            <TouchableOpacity onPress={() => setEditing(true)}>
-              <Text style={styles.editText}>Edit</Text>
-            </TouchableOpacity>
+        {/* Plant notes */}
+        {plant?.notes ? (
+          <View style={styles.notesSection}>
+            <Text style={styles.sectionTitle}>Notes</Text>
+            <Text style={styles.notesText}>{plant.notes}</Text>
           </View>
+        ) : null}
 
-          {plant?.species && <Text style={styles.species}>{plant.species}</Text>}
-
-          {plant?.notes ? (
-            <View style={styles.section}>
-              <Text style={styles.sectionLabel}>Notes</Text>
-              <Text style={styles.sectionContent}>{plant.notes}</Text>
-            </View>
-          ) : null}
-
-          <View style={styles.section}>
-            <Text style={styles.sectionLabel}>Added</Text>
-            <Text style={styles.sectionContent}>
-              {new Date(plant!.created_at).toLocaleDateString()}
-            </Text>
-          </View>
-
-          <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
+        {/* Added date and delete */}
+        <View style={styles.metaSection}>
+          <Text style={styles.metaText}>
+            Added{' '}
+            {new Date(plant!.created_at).toLocaleDateString(undefined, {
+              month: 'long', day: 'numeric', year: 'numeric',
+            })}
+          </Text>
+          <TouchableOpacity onPress={handleDelete}>
             <Text style={styles.deleteText}>Delete Plant</Text>
           </TouchableOpacity>
-        </>
-      )}
-    </ScrollView>
-    </KeyboardAvoidingView>
+        </View>
+      </>
+    )
+  }
+
+  function renderHistory() {
+    const timeline = buildTimeline()
+
+    if (timeline.length === 0) {
+      return (
+        <View style={styles.emptyTab}>
+          <Text style={styles.emptyTabIcon}>📋</Text>
+          <Text style={styles.emptyTabTitle}>No history yet</Text>
+          <Text style={styles.emptyTabText}>
+            Log care events or run an AI analysis on the Overview tab to start building your plant's history.
+          </Text>
+        </View>
+      )
+    }
+
+    return (
+      <View style={{ paddingBottom: 16 }}>
+        {timeline.map((item, index) => (
+          <View key={item.id} style={styles.timelineItem}>
+            {/* Left rail — dot and connecting line */}
+            <View style={styles.timelineRail}>
+              <View style={[
+                styles.timelineDot,
+                item.kind === 'analysis' && styles.timelineDotAnalysis,
+              ]} />
+              {index < timeline.length - 1 && <View style={styles.timelineLine} />}
+            </View>
+
+            {/* Right content */}
+            <View style={styles.timelineContent}>
+              <Text style={styles.timelineDate}>{formatDate(item.date)}</Text>
+
+              {item.kind === 'care' ? (
+                <>
+                  <Text style={styles.timelineType}>{careLabel(item.data.type)}</Text>
+                  {item.data.notes ? (
+                    <Text style={styles.timelineNote}>{item.data.notes}</Text>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <Text style={styles.timelineType}>🔍 AI Analysis</Text>
+                  {item.data.species ? (
+                    <Text style={styles.timelineNote}>Species: {item.data.species}</Text>
+                  ) : null}
+                  {item.data.health ? (
+                    <Text style={styles.timelineNote}>{item.data.health}</Text>
+                  ) : null}
+                </>
+              )}
+            </View>
+          </View>
+        ))}
+      </View>
+    )
+  }
+
+  function renderSpecies() {
+    // Still loading
+    if (fetchingSpeciesProfile && !speciesProfile) {
+      return (
+        <View style={styles.emptyTab}>
+          <ActivityIndicator size="large" color="#2d6a4f" style={{ marginBottom: 16 }} />
+          <Text style={styles.emptyTabText}>Fetching species info...</Text>
+        </View>
+      )
+    }
+
+    // Species not yet identified
+    if (!plant?.species) {
+      return (
+        <View style={styles.emptyTab}>
+          <Text style={styles.emptyTabIcon}>🔍</Text>
+          <Text style={styles.emptyTabTitle}>Species unknown</Text>
+          <Text style={styles.emptyTabText}>
+            Run an AI analysis on the Overview tab to identify your plant's species and unlock the full species guide.
+          </Text>
+        </View>
+      )
+    }
+
+    // Species known but profile not yet loaded
+    if (!speciesProfile) {
+      return (
+        <View style={styles.emptyTab}>
+          <Text style={styles.emptyTabIcon}>📖</Text>
+          <Text style={styles.emptyTabTitle}>{plant.species}</Text>
+          <TouchableOpacity
+            style={styles.fetchProfileButton}
+            onPress={() => fetchSpeciesProfileFromAI(plant.species!)}
+            disabled={fetchingSpeciesProfile}
+          >
+            <Text style={styles.fetchProfileText}>
+              {fetchingSpeciesProfile ? 'Loading...' : 'Load Species Guide'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )
+    }
+
+    // Full species profile
+    const fields = [
+      { label: '☀️ Light', value: speciesProfile.light },
+      { label: '💧 Watering', value: speciesProfile.watering },
+      { label: '💨 Humidity', value: speciesProfile.humidity },
+      { label: '🌡️ Temperature', value: speciesProfile.temperature },
+      { label: '🪴 Soil', value: speciesProfile.soil },
+      { label: '⚠️ Toxicity', value: speciesProfile.toxicity },
+      { label: '🐛 Common Problems', value: speciesProfile.common_problems },
+      { label: '🌱 Growth Habits', value: speciesProfile.growth_habits },
+      { label: '✂️ Propagation', value: speciesProfile.propagation },
+    ].filter(f => f.value)
+
+    return (
+      <>
+        {/* Species name header with refresh button */}
+        <View style={styles.speciesHeader}>
+          <View style={{ flex: 1, marginRight: 12 }}>
+            {speciesProfile.common_names ? (
+              <Text style={styles.speciesCommonName}>{speciesProfile.common_names}</Text>
+            ) : null}
+            {speciesProfile.scientific_name ? (
+              <Text style={styles.speciesScientificName}>{speciesProfile.scientific_name}</Text>
+            ) : null}
+          </View>
+          <TouchableOpacity
+            onPress={() => fetchSpeciesProfileFromAI(speciesProfile.species_name, true)}
+            disabled={fetchingSpeciesProfile}
+          >
+            <Text style={styles.refreshText}>
+              {fetchingSpeciesProfile ? 'Refreshing...' : 'Refresh'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* All care fields, no collapsing needed — it's their own tab */}
+        {fields.map(field => (
+          <View key={field.label} style={styles.speciesField}>
+            <Text style={styles.speciesFieldLabel}>{field.label}</Text>
+            <Text style={styles.speciesFieldValue}>{field.value}</Text>
+          </View>
+        ))}
+      </>
+    )
+  }
+
+  function renderEditForm() {
+    return (
+      <View style={{ paddingHorizontal: 20, paddingTop: 24 }}>
+        <Text style={styles.editTitle}>Edit Plant</Text>
+
+        <Text style={styles.editLabel}>Nickname *</Text>
+        <TextInput
+          style={styles.editInput}
+          value={nickname}
+          onChangeText={setNickname}
+          placeholderTextColor="#aaa"
+        />
+
+        <Text style={styles.editLabel}>Species</Text>
+        <TextInput
+          style={styles.editInput}
+          value={species}
+          onChangeText={setSpecies}
+          placeholder="e.g. Monstera deliciosa"
+          placeholderTextColor="#aaa"
+        />
+
+        <Text style={styles.editLabel}>Notes</Text>
+        <TextInput
+          style={[styles.editInput, styles.editTextArea]}
+          value={notes}
+          onChangeText={setNotes}
+          multiline
+          numberOfLines={4}
+          placeholderTextColor="#aaa"
+        />
+
+        <TouchableOpacity
+          style={[styles.saveButton, saving && styles.disabledButton]}
+          onPress={handleSave}
+          disabled={saving}
+        >
+          <Text style={styles.saveButtonText}>{saving ? 'Saving...' : 'Save Changes'}</Text>
+        </TouchableOpacity>
+      </View>
+    )
+  }
+
+  // ── Main return ────────────────────────────────────────────────────────────
+
+  return (
+    <PageContainer>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        {/* Fixed header — always visible */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <Text style={styles.backText}>← My Plants</Text>
+          </TouchableOpacity>
+          <View style={styles.headerRow}>
+            <View style={styles.headerTitles}>
+              <Text style={styles.plantName} numberOfLines={1}>{plant?.nickname}</Text>
+              {plant?.species ? (
+                <Text style={styles.plantSpecies} numberOfLines={1}>{plant.species}</Text>
+              ) : null}
+            </View>
+            {editing ? (
+              <TouchableOpacity onPress={() => setEditing(false)}>
+                <Text style={styles.headerAction}>Cancel</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity onPress={() => setEditing(true)}>
+                <Text style={styles.headerAction}>Edit</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+
+        {/* Tab bar — hidden when editing so the edit form has full focus */}
+        {!editing && (
+          <View style={styles.tabBar}>
+            {(['overview', 'history', 'species'] as Tab[]).map(tab => (
+              <TouchableOpacity
+                key={tab}
+                style={[styles.tabItem, activeTab === tab && styles.tabItemActive]}
+                onPress={() => setActiveTab(tab)}
+              >
+                <Text style={[styles.tabLabel, activeTab === tab && styles.tabLabelActive]}>
+                  {tab === 'overview' ? 'Overview' : tab === 'history' ? 'History' : 'Species'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        {/* Scrollable tab content */}
+        <ScrollView
+          style={styles.scrollArea}
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {editing
+            ? renderEditForm()
+            : activeTab === 'overview'
+              ? renderOverview()
+              : activeTab === 'history'
+                ? renderHistory()
+                : renderSpecies()
+          }
+        </ScrollView>
+      </KeyboardAvoidingView>
     </PageContainer>
   )
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff', paddingHorizontal: 24, paddingTop: 60 },
-  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  backButton: { marginBottom: 16 },
-  backText: { color: '#2d6a4f', fontSize: 16 },
+// ── Styles ─────────────────────────────────────────────────────────────────────
 
-  photosSection: { marginBottom: 16 },
-  photoScroll: { marginBottom: 12 },
-  photoThumb: {
-    width: 130, height: 130, borderRadius: 10, marginRight: 10, backgroundColor: '#f4faf7',
-  },
-  noPhotos: {
-    height: 110, backgroundColor: '#f4faf7', borderRadius: 10,
-    justifyContent: 'center', alignItems: 'center', marginBottom: 12,
-    borderWidth: 1, borderColor: '#d4eadf', borderStyle: 'dashed',
-  },
-  noPhotosText: { color: '#aaa', fontSize: 15 },
-  addPhotoButton: {
-    borderWidth: 1, borderColor: '#2d6a4f', borderRadius: 10,
-    paddingVertical: 12, alignItems: 'center',
-  },
-  addPhotoText: { color: '#2d6a4f', fontSize: 15, fontWeight: '600' },
+const styles = StyleSheet.create({
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   disabledButton: { opacity: 0.5 },
 
+  // ── Header ──
+  header: {
+    paddingHorizontal: 20,
+    paddingTop: 56,
+    paddingBottom: 12,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  backButton: { marginBottom: 8 },
+  backText: { color: '#2d6a4f', fontSize: 15 },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  headerTitles: { flex: 1, marginRight: 16 },
+  plantName: { fontSize: 22, fontWeight: '700', color: '#1a1a1a' },
+  plantSpecies: { fontSize: 13, color: '#888', marginTop: 2, fontStyle: 'italic' },
+  headerAction: { fontSize: 16, color: '#2d6a4f', fontWeight: '600', paddingTop: 2 },
+
+  // ── Tab bar ──
+  tabBar: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  tabItem: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  tabItemActive: { borderBottomColor: '#2d6a4f' },
+  tabLabel: { fontSize: 13, fontWeight: '500', color: '#aaa' },
+  tabLabelActive: { color: '#2d6a4f', fontWeight: '700' },
+
+  // ── Scroll area ──
+  scrollArea: { flex: 1, backgroundColor: '#fff' },
+  scrollContent: { paddingBottom: 60 },
+
+  // ── Hero photo ──
+  heroSection: {
+    width: '100%',
+    aspectRatio: 4 / 3,
+    backgroundColor: '#f4faf7',
+  },
+  heroImage: { width: '100%', height: '100%' },
+  heroPlaceholder: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  heroPlaceholderIcon: { fontSize: 52 },
+  heroPlaceholderText: { fontSize: 15, color: '#aaa', marginTop: 10 },
+
+  // ── Quick-action bar ──
+  quickActions: {
+    flexDirection: 'row',
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    gap: 8,
+  },
+  quickAction: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 11,
+    backgroundColor: '#f4faf7',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#d4eadf',
+  },
+  quickActionIcon: { fontSize: 20, marginBottom: 4 },
+  quickActionLabel: { fontSize: 10, color: '#2d6a4f', fontWeight: '600' },
+
+  // ── Note input ──
+  noteInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 16,
+    marginBottom: 12,
+    gap: 8,
+  },
+  noteInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#d4eadf',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#333',
+    backgroundColor: '#f4faf7',
+  },
+  noteSubmitButton: {
+    backgroundColor: '#2d6a4f',
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  noteSubmitText: { color: '#fff', fontWeight: '600', fontSize: 14 },
+
+  // ── Analyze button ──
   analyzeButton: {
-    backgroundColor: '#2d6a4f', borderRadius: 10, paddingVertical: 14,
-    alignItems: 'center', marginBottom: 24, marginTop: 10,
+    backgroundColor: '#2d6a4f',
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginHorizontal: 16,
+    marginBottom: 20,
   },
   analyzeButtonInner: { flexDirection: 'row', alignItems: 'center' },
   analyzeButtonText: { color: '#fff', fontSize: 15, fontWeight: '700' },
 
-  // Latest analysis card
+  // ── Analysis card ──
   analysisCard: {
-    backgroundColor: '#f4faf7', borderRadius: 14, padding: 20,
-    marginBottom: 16, borderWidth: 1, borderColor: '#d4eadf',
+    backgroundColor: '#f4faf7',
+    borderRadius: 14,
+    padding: 20,
+    marginHorizontal: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#d4eadf',
   },
   analysisCardHeader: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
   },
-  analysisTitle: { fontSize: 17, fontWeight: '700', color: '#2d6a4f' },
+  analysisTitle: { fontSize: 15, fontWeight: '700', color: '#2d6a4f' },
   analysisDate: { fontSize: 12, color: '#aaa' },
-  analysisSection: { marginBottom: 14 },
+  analysisSection: { marginBottom: 12 },
   analysisSectionLabel: {
-    fontSize: 11, fontWeight: '700', color: '#2d6a4f', letterSpacing: 0.8, marginBottom: 4,
-  },
-  analysisSectionText: { fontSize: 15, color: '#333', lineHeight: 22 },
-  analysisDisclaimer: { fontSize: 12, color: '#aaa', marginTop: 8, fontStyle: 'italic' },
-
-  // Shared section title style
-  sectionTitle: {
-    fontSize: 16, fontWeight: '700', color: '#333', marginBottom: 12,
-  },
-
-  // Reminder section
-  reminderSection: {
-    marginBottom: 28,
-  },
-  reminderActive: {
-    flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-between', marginBottom: 12,
-  },
-  reminderActiveText: {
-    fontSize: 14, color: '#2d6a4f', fontWeight: '600',
-  },
-  reminderRemoveButton: {
-    paddingHorizontal: 12, paddingVertical: 6,
-    borderWidth: 1, borderColor: '#d9534f', borderRadius: 8,
-  },
-  reminderRemoveText: { color: '#d9534f', fontSize: 13, fontWeight: '600' },
-  reminderNoneText: { fontSize: 14, color: '#aaa', marginBottom: 12 },
-  reminderChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  reminderChip: {
-    paddingHorizontal: 14, paddingVertical: 8,
-    borderRadius: 20, borderWidth: 1, borderColor: '#2d6a4f',
-  },
-  reminderChipActive: { backgroundColor: '#2d6a4f' },
-  reminderChipText: { fontSize: 13, color: '#2d6a4f', fontWeight: '500' },
-  reminderChipTextActive: { color: '#fff' },
-
-  // Care log section
-  careSection: {
-    marginBottom: 8,
-  },
-  careButtons: {
-    flexDirection: 'row', gap: 10, marginBottom: 12,
-  },
-  careButton: {
-    flex: 1, borderWidth: 1, borderColor: '#2d6a4f', borderRadius: 10,
-    paddingVertical: 12, alignItems: 'center',
-  },
-  careButtonText: {
-    color: '#2d6a4f', fontSize: 13, fontWeight: '600',
-  },
-  noteInputRow: {
-    flexDirection: 'row', gap: 8, marginBottom: 4,
-  },
-  noteInput: {
-    flex: 1, borderWidth: 1, borderColor: '#ddd', borderRadius: 10,
-    paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: '#333',
-  },
-  noteSubmitButton: {
-    backgroundColor: '#2d6a4f', borderRadius: 10,
-    paddingHorizontal: 18, justifyContent: 'center',
-  },
-  noteSubmitText: { color: '#fff', fontWeight: '600', fontSize: 15 },
-  careLogEntry: { paddingHorizontal: 16, paddingBottom: 12 },
-  careLogRow: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2,
-  },
-  careLogType: { fontSize: 14, fontWeight: '600', color: '#333' },
-  careLogDate: { fontSize: 12, color: '#aaa' },
-  careLogNote: { fontSize: 13, color: '#666', marginTop: 3, lineHeight: 18 },
-
-  // History section
-  historySection: {
-    backgroundColor: '#fafafa', borderRadius: 14, marginBottom: 24,
-    borderWidth: 1, borderColor: '#eee', overflow: 'hidden',
-  },
-  historyToggle: { padding: 16 },
-  historyToggleText: { fontSize: 14, fontWeight: '600', color: '#2d6a4f' },
-  historyEntry: { paddingHorizontal: 16, paddingBottom: 16 },
-  historyDate: { fontSize: 13, fontWeight: '700', color: '#2d6a4f', marginBottom: 12 },
-  historyText: { fontSize: 14, color: '#444', lineHeight: 20 },
-  historyDivider: { height: 1, backgroundColor: '#eee', marginVertical: 16 },
-
-  titleRow: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4,
-  },
-  header: { fontSize: 28, fontWeight: 'bold', color: '#2d6a4f', flex: 1 },
-  editText: { color: '#2d6a4f', fontSize: 16, paddingLeft: 12 },
-  species: { fontSize: 16, color: '#888', marginBottom: 28, fontStyle: 'italic' },
-  section: { marginBottom: 24 },
-  sectionLabel: {
-    fontSize: 12, fontWeight: '700', color: '#aaa',
-    textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6,
-  },
-  sectionContent: { fontSize: 16, color: '#333', lineHeight: 22 },
-  label: { fontSize: 14, fontWeight: '600', color: '#555', marginBottom: 6 },
-  input: {
-    borderWidth: 1, borderColor: '#ddd', borderRadius: 10,
-    paddingHorizontal: 16, paddingVertical: 14, fontSize: 16, marginBottom: 20, color: '#333',
-  },
-  textArea: { height: 100, textAlignVertical: 'top' },
-  button: {
-    backgroundColor: '#2d6a4f', borderRadius: 10,
-    paddingVertical: 16, alignItems: 'center', marginTop: 8,
-  },
-  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  cancelButton: { paddingVertical: 16, alignItems: 'center' },
-  cancelText: { color: '#888', fontSize: 16 },
-  deleteButton: {
-    marginTop: 48, borderWidth: 1, borderColor: '#d9534f',
-    borderRadius: 10, paddingVertical: 14, alignItems: 'center',
-  },
-  deleteText: { color: '#d9534f', fontSize: 16, fontWeight: '600' },
-
-  // Species profile section
-  speciesProfileSection: { marginBottom: 28 },
-  speciesProfileHeader: {
-    flexDirection: 'row', justifyContent: 'space-between',
-    alignItems: 'center', marginBottom: 12,
-  },
-  refreshText: { fontSize: 13, color: '#2d6a4f', fontWeight: '600' },
-  speciesProfileCard: {
-    backgroundColor: '#f4faf7', borderRadius: 14,
-    borderWidth: 1, borderColor: '#d4eadf', overflow: 'hidden',
-  },
-  speciesProfileRow: {
-    paddingHorizontal: 16, paddingVertical: 12,
-    borderBottomWidth: 1, borderBottomColor: '#e8f4ee',
-  },
-  speciesProfileLabel: {
     fontSize: 11, fontWeight: '700', color: '#2d6a4f',
     letterSpacing: 0.8, marginBottom: 4,
   },
-  speciesProfileValue: { fontSize: 14, color: '#333', lineHeight: 20 },
-  speciesProfileToggle: {
-    paddingHorizontal: 16, paddingVertical: 12,
+  analysisSectionText: { fontSize: 14, color: '#333', lineHeight: 22 },
+  analysisDisclaimer: { fontSize: 12, color: '#aaa', marginTop: 4, fontStyle: 'italic' },
+
+  // ── Reminder section ──
+  reminderSection: { paddingHorizontal: 16, marginBottom: 24 },
+  sectionTitle: { fontSize: 14, fontWeight: '700', color: '#333', marginBottom: 10 },
+  reminderActive: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 10,
   },
-  speciesProfileToggleText: { fontSize: 13, fontWeight: '600', color: '#2d6a4f' },
-  speciesProfileLoading: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
+  reminderActiveText: { fontSize: 14, color: '#2d6a4f' },
+  reminderRemoveText: { fontSize: 14, color: '#e74c3c' },
+  reminderNoneText: { fontSize: 13, color: '#aaa', marginBottom: 10 },
+  reminderChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  reminderChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#d4eadf',
+    backgroundColor: '#f4faf7',
+  },
+  reminderChipActive: { backgroundColor: '#2d6a4f', borderColor: '#2d6a4f' },
+  reminderChipText: { fontSize: 13, color: '#2d6a4f' },
+  reminderChipTextActive: { color: '#fff', fontWeight: '600' },
+
+  // ── Notes + meta ──
+  notesSection: { paddingHorizontal: 16, marginBottom: 20 },
+  notesText: { fontSize: 14, color: '#555', lineHeight: 22 },
+  metaSection: {
+    paddingHorizontal: 16,
+    marginBottom: 20,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  metaText: { fontSize: 13, color: '#aaa' },
+  deleteText: { fontSize: 14, color: '#e74c3c' },
+
+  // ── Timeline (History tab) ──
+  timelineItem: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+  },
+  timelineRail: {
+    width: 20,
+    alignItems: 'center',
+    marginRight: 14,
+  },
+  timelineDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#2d6a4f',
+    marginTop: 4,
+  },
+  timelineDotAnalysis: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#1a4a38',
+    marginTop: 3,
+  },
+  timelineLine: {
+    flex: 1,
+    width: 1.5,
+    backgroundColor: '#d4eadf',
+    marginTop: 4,
+  },
+  timelineContent: {
+    flex: 1,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f4f4f4',
+  },
+  timelineDate: { fontSize: 11, color: '#aaa', marginBottom: 4 },
+  timelineType: { fontSize: 14, fontWeight: '600', color: '#333', marginBottom: 4 },
+  timelineNote: { fontSize: 13, color: '#666', lineHeight: 20 },
+
+  // ── Empty tab state ──
+  emptyTab: {
+    alignItems: 'center',
+    paddingHorizontal: 32,
+    paddingTop: 64,
+  },
+  emptyTabIcon: { fontSize: 48, marginBottom: 16 },
+  emptyTabTitle: {
+    fontSize: 18, fontWeight: '700', color: '#333',
+    marginBottom: 8, textAlign: 'center',
+  },
+  emptyTabText: { fontSize: 14, color: '#888', textAlign: 'center', lineHeight: 22 },
+
+  // ── Species tab ──
+  speciesHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  speciesCommonName: { fontSize: 17, fontWeight: '700', color: '#1a1a1a', marginBottom: 3 },
+  speciesScientificName: { fontSize: 13, color: '#888', fontStyle: 'italic' },
+  refreshText: { fontSize: 14, color: '#2d6a4f', fontWeight: '600' },
+  speciesField: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f4f4f4',
+  },
+  speciesFieldLabel: {
+    fontSize: 11, fontWeight: '700', color: '#2d6a4f',
+    letterSpacing: 0.8, marginBottom: 6,
+  },
+  speciesFieldValue: { fontSize: 14, color: '#333', lineHeight: 22 },
+  fetchProfileButton: {
+    marginTop: 24,
+    backgroundColor: '#2d6a4f',
+    paddingHorizontal: 28,
+    paddingVertical: 13,
+    borderRadius: 10,
+  },
+  fetchProfileText: { color: '#fff', fontWeight: '700', fontSize: 15 },
+
+  // ── Edit form ──
+  editTitle: {
+    fontSize: 20, fontWeight: '700', color: '#1a1a1a', marginBottom: 24,
+  },
+  editLabel: {
+    fontSize: 13, fontWeight: '600', color: '#555', marginBottom: 6,
+  },
+  editInput: {
+    borderWidth: 1,
+    borderColor: '#d4eadf',
+    borderRadius: 10,
+    paddingHorizontal: 14,
     paddingVertical: 12,
+    fontSize: 15,
+    color: '#333',
+    marginBottom: 16,
+    backgroundColor: '#fafafa',
   },
-  speciesProfileLoadingText: { fontSize: 14, color: '#888' },
-  speciesProfileFetchButton: {
-    borderWidth: 1, borderColor: '#2d6a4f', borderRadius: 10,
-    paddingVertical: 12, alignItems: 'center',
+  editTextArea: { height: 100, textAlignVertical: 'top' },
+  saveButton: {
+    backgroundColor: '#2d6a4f',
+    borderRadius: 10,
+    paddingVertical: 15,
+    alignItems: 'center',
+    marginTop: 8,
   },
-  speciesProfileFetchText: { color: '#2d6a4f', fontSize: 14, fontWeight: '600' },
-  speciesProfileEmptyText: { fontSize: 14, color: '#aaa', lineHeight: 20 },
+  saveButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 })

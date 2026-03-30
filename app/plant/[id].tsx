@@ -14,6 +14,7 @@ import { scheduleWateringReminder, cancelNotification } from '@/lib/notification
 import { supabase } from '@/lib/supabase'
 import { Plant, PlantPhoto, AnalysisResult, CareLog, SpeciesProfile } from '@/lib/types'
 import PageContainer from '@/components/PageContainer'
+import { DatePickerField } from '@/components/DatePickerField'
 
 // AsyncStorage key for storing the scheduled notification ID for a plant.
 // Notification IDs are device-specific so they live on-device, not in Supabase.
@@ -1067,23 +1068,17 @@ export default function PlantDetailScreen() {
         />
 
         <Text style={styles.editLabel}>Date acquired</Text>
-        <TextInput
-          style={styles.editInput}
+        <DatePickerField
           value={acquiredDate}
-          onChangeText={setAcquiredDate}
-          placeholder="YYYY-MM-DD"
-          placeholderTextColor="#aaa"
-          keyboardType="numbers-and-punctuation"
+          onChange={setAcquiredDate}
+          placeholder="Tap to select a date"
         />
 
         <Text style={styles.editLabel}>Last repotted</Text>
-        <TextInput
-          style={styles.editInput}
+        <DatePickerField
           value={lastRepottedDate}
-          onChangeText={setLastRepottedDate}
-          placeholder="YYYY-MM-DD"
-          placeholderTextColor="#aaa"
-          keyboardType="numbers-and-punctuation"
+          onChange={setLastRepottedDate}
+          placeholder="Tap to select a date"
         />
 
         <Text style={styles.editLabel}>Notes</Text>

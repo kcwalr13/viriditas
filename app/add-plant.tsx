@@ -1,6 +1,7 @@
 // app/add-plant.tsx
 // Form screen for registering a new plant.
 // Nickname is required — everything else is optional but helps the AI give better advice.
+import { DatePickerField } from '@/components/DatePickerField'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'expo-router'
 import { useState } from 'react'
@@ -21,12 +22,7 @@ export default function AddPlantScreen() {
       return
     }
 
-    // Validate acquired date format if provided — expects YYYY-MM-DD
-    if (acquiredDate.trim() && !/^\d{4}-\d{2}-\d{2}$/.test(acquiredDate.trim())) {
-      Alert.alert('Invalid date', 'Please enter the date as YYYY-MM-DD, e.g. 2024-03-15')
-      return
-    }
-
+    // acquiredDate is always valid YYYY-MM-DD (set by the picker) or empty
     setLoading(true)
 
     // Get the currently logged-in user so we can link the plant to them
@@ -95,13 +91,10 @@ export default function AddPlantScreen() {
         />
 
         <Text style={styles.label}>Date acquired (optional)</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="YYYY-MM-DD, e.g. 2024-03-15"
+        <DatePickerField
           value={acquiredDate}
-          onChangeText={setAcquiredDate}
-          placeholderTextColor="#aaa"
-          keyboardType="numbers-and-punctuation"
+          onChange={setAcquiredDate}
+          placeholder="Tap to select a date"
         />
 
         <Text style={styles.label}>Notes (optional)</Text>

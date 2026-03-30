@@ -56,10 +56,18 @@ type SpeciesProfileContext = {
   [key: string]: string | null | undefined
 }
 
+// Physical context about the individual plant — location and pot info
+// help the AI give more grounded, specific recommendations
+type PlantContext = {
+  location?: string | null   // e.g. "Living room — east window"
+  pot_size?: string | null   // e.g. "6 inch terracotta"
+}
+
 function buildPrompt(
   previousAnalyses: PreviousAnalysis[],
   recentCareLogs: CareLogEntry[],
-  speciesProfile: SpeciesProfileContext | null
+  speciesProfile: SpeciesProfileContext | null,
+  plantContext: PlantContext | null
 ): string {
   const hasHistory = previousAnalyses.length > 0
   const hasCare = recentCareLogs.length > 0
@@ -74,6 +82,13 @@ function buildPrompt(
 - Humidity: ${speciesProfile.humidity ?? 'unknown'}
 - Temperature: ${speciesProfile.temperature ?? 'unknown'}
 - Common problems: ${speciesProfile.common_problems ?? 'unknown'}`
+    : ''
+
+  // Location and pot size give context that makes recommendations more actionable —
+  // e.g. if the plant is in a north-facing window, light advice changes significantly
+  const plantContextSection = plantContext && (plantContext.location || plantContext.pot_size)
+    ? `\nPlant context:${plantContext.location ? `\n- Location: ${plantContext.location}` : ''}${plantContext.pot_size ? `\n- Pot size: ${plantContext.pot_size}` : ''}
+Factor this into your recommendations — for example, reference the specific light conditions of their location, or comment on whether the pot size seems appropriate.`
     : ''
 
   const historySection = hasHistory
@@ -103,7 +118,7 @@ Analyze this photo of a houseplant and respond with a JSON object in exactly thi
   "health": "A 2-3 sentence assessment of the plant's current health. ${healthInstruction}",
   "care": "2-3 specific, actionable care recommendations for this plant right now."
 }
-Only respond with the JSON object. No extra text.${speciesSection}${historySection}${careSection}`
+Only respond with the JSON object. No extra text.${speciesSection}${plantContextSection}${historySection}${careSection}`
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -252,6 +267,7 @@ serve(async (req) => {
       previousAnalyses = [],
       recentCareLogs = [],
       speciesProfile = null,   // optional cached species reference data
+      plantContext = null,     // optional location/pot info for more grounded recommendations
     } = await req.json()
 
     if (!imageUrl) {
@@ -261,13 +277,14 @@ serve(async (req) => {
       )
     }
 
-    // Build a prompt that includes species context, analysis history, and care logs
-    const prompt = buildPrompt(previousAnalyses, recentCareLogs, speciesProfile)
+    // Build a prompt that includes all available context
+    const prompt = buildPrompt(previousAnalyses, recentCareLogs, speciesProfile, plantContext)
     console.log(
       'Analysis with',
       previousAnalyses.length, 'previous analyses,',
       recentCareLogs.length, 'care log entries,',
-      speciesProfile ? 'species profile included' : 'no species profile'
+      speciesProfile ? 'species profile included' : 'no species profile,',
+      plantContext?.location ? `location: ${plantContext.location}` : 'no location'
     )
 
     // Fetch the image from the URL and convert to base64 server-side.

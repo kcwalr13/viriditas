@@ -8,6 +8,10 @@ export type Plant = {
   species: string | null          // null means the user didn't fill this in
   notes: string | null
   watering_interval_days: number | null  // null means no reminder set
+  location: string | null         // e.g. "Living room — east window"
+  pot_size: string | null         // e.g. "6 inch terracotta"
+  acquired_date: string | null    // ISO date string, e.g. "2024-03-15"
+  last_repotted_date: string | null
   created_at: string
 }
 
@@ -23,7 +27,11 @@ export type CareLog = {
   id: string
   plant_id: string
   user_id: string
-  type: 'watered' | 'fertilized' | 'note'
+  // Primary actions (shown in the main quick-action bar):
+  //   watered, fertilized, note
+  // Secondary actions (shown in the expandable "More" row):
+  //   repotted, pruned, misted, pest_treatment, moved
+  type: 'watered' | 'fertilized' | 'note' | 'repotted' | 'pruned' | 'misted' | 'pest_treatment' | 'moved'
   notes: string | null
   logged_at: string
 }

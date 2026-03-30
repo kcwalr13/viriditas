@@ -1,6 +1,6 @@
 // app/add-plant.tsx
 // Form screen for registering a new plant.
-// Only nickname is required — species and notes are optional.
+// Nickname is required — everything else is optional but helps the AI give better advice.
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'expo-router'
 import { useState } from 'react'
@@ -9,6 +9,8 @@ import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, Te
 export default function AddPlantScreen() {
   const [nickname, setNickname] = useState('')
   const [species, setSpecies] = useState('')
+  const [location, setLocation] = useState('')
+  const [acquiredDate, setAcquiredDate] = useState('')
   const [notes, setNotes] = useState('')
   const [loading, setLoading] = useState(false)
   const router = useRouter()
@@ -19,6 +21,12 @@ export default function AddPlantScreen() {
       return
     }
 
+    // Validate acquired date format if provided — expects YYYY-MM-DD
+    if (acquiredDate.trim() && !/^\d{4}-\d{2}-\d{2}$/.test(acquiredDate.trim())) {
+      Alert.alert('Invalid date', 'Please enter the date as YYYY-MM-DD, e.g. 2024-03-15')
+      return
+    }
+
     setLoading(true)
 
     // Get the currently logged-in user so we can link the plant to them
@@ -26,7 +34,9 @@ export default function AddPlantScreen() {
 
     const { error } = await supabase.from('plants').insert({
       nickname: nickname.trim(),
-      species: species.trim() || null,   // Store null if left empty
+      species: species.trim() || null,
+      location: location.trim() || null,
+      acquired_date: acquiredDate.trim() || null,
       notes: notes.trim() || null,
       user_id: user!.id,
     })
@@ -46,7 +56,11 @@ export default function AddPlantScreen() {
       style={{ flex: 1 }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 60 }}>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={{ paddingBottom: 60 }}
+        showsVerticalScrollIndicator={false}
+      >
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Text style={styles.backText}>← Back</Text>
         </TouchableOpacity>
@@ -71,10 +85,29 @@ export default function AddPlantScreen() {
           placeholderTextColor="#aaa"
         />
 
+        <Text style={styles.label}>Location (optional)</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="e.g. Living room — east window"
+          value={location}
+          onChangeText={setLocation}
+          placeholderTextColor="#aaa"
+        />
+
+        <Text style={styles.label}>Date acquired (optional)</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="YYYY-MM-DD, e.g. 2024-03-15"
+          value={acquiredDate}
+          onChangeText={setAcquiredDate}
+          placeholderTextColor="#aaa"
+          keyboardType="numbers-and-punctuation"
+        />
+
         <Text style={styles.label}>Notes (optional)</Text>
         <TextInput
           style={[styles.input, styles.textArea]}
-          placeholder="Where it lives, anything you've noticed, etc."
+          placeholder="Anything else you want to remember..."
           value={notes}
           onChangeText={setNotes}
           multiline
@@ -100,7 +133,11 @@ const styles = StyleSheet.create({
   backText: { color: '#2d6a4f', fontSize: 16 },
   header: { fontSize: 28, fontWeight: 'bold', color: '#2d6a4f', marginBottom: 32 },
   label: { fontSize: 14, fontWeight: '600', color: '#555', marginBottom: 6 },
-  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 14, fontSize: 16, marginBottom: 20, color: '#333' },
+  input: {
+    borderWidth: 1, borderColor: '#ddd', borderRadius: 10,
+    paddingHorizontal: 16, paddingVertical: 14,
+    fontSize: 16, marginBottom: 20, color: '#333',
+  },
   textArea: { height: 100, textAlignVertical: 'top' },
   button: { backgroundColor: '#2d6a4f', borderRadius: 10, paddingVertical: 16, alignItems: 'center', marginTop: 8 },
   buttonDisabled: { opacity: 0.6 },

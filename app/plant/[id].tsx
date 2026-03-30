@@ -70,10 +70,15 @@ export default function PlantDetailScreen() {
   const [loggingCare, setLoggingCare] = useState(false)
   const [showNoteInput, setShowNoteInput] = useState(false)
   const [noteText, setNoteText] = useState('')
+  const [showMoreActions, setShowMoreActions] = useState(false)
 
   // Edit form — pre-filled when editing starts
   const [nickname, setNickname] = useState('')
   const [species, setSpecies] = useState('')
+  const [location, setLocation] = useState('')
+  const [potSize, setPotSize] = useState('')
+  const [acquiredDate, setAcquiredDate] = useState('')
+  const [lastRepottedDate, setLastRepottedDate] = useState('')
   const [notes, setNotes] = useState('')
 
   // Reload all data every time the screen comes into focus
@@ -112,6 +117,10 @@ export default function PlantDetailScreen() {
       setPlant(data)
       setNickname(data.nickname)
       setSpecies(data.species || '')
+      setLocation(data.location || '')
+      setPotSize(data.pot_size || '')
+      setAcquiredDate(data.acquired_date || '')
+      setLastRepottedDate(data.last_repotted_date || '')
       setNotes(data.notes || '')
       setReminderDays(data.watering_interval_days ?? null)
     }
@@ -326,7 +335,12 @@ export default function PlantDetailScreen() {
           imageUrl,
           previousAnalyses,
           recentCareLogs,
-          speciesProfile: speciesProfile ?? null, // Species context makes the analysis smarter
+          speciesProfile: speciesProfile ?? null,
+          // Location and pot size let the AI give more specific, grounded recommendations
+          plantContext: (plant?.location || plant?.pot_size) ? {
+            location: plant?.location ?? null,
+            pot_size: plant?.pot_size ?? null,
+          } : null,
         },
         headers: { Authorization: `Bearer ${session.access_token}` },
       })
@@ -491,6 +505,10 @@ export default function PlantDetailScreen() {
       .update({
         nickname: nickname.trim(),
         species: species.trim() || null,
+        location: location.trim() || null,
+        pot_size: potSize.trim() || null,
+        acquired_date: acquiredDate.trim() || null,
+        last_repotted_date: lastRepottedDate.trim() || null,
         notes: notes.trim() || null,
       })
       .eq('id', id)
@@ -532,9 +550,14 @@ export default function PlantDetailScreen() {
 
   function careLabel(type: CareLog['type']) {
     switch (type) {
-      case 'watered':    return '💧 Watered'
-      case 'fertilized': return '🌿 Fertilized'
-      case 'note':       return '📝 Note'
+      case 'watered':       return '💧 Watered'
+      case 'fertilized':    return '🌿 Fertilized'
+      case 'note':          return '📝 Note'
+      case 'repotted':      return '🪴 Repotted'
+      case 'pruned':        return '✂️ Pruned'
+      case 'misted':        return '💦 Misted'
+      case 'pest_treatment': return '🐛 Pest Treatment'
+      case 'moved':         return '📍 Moved'
     }
   }
 
@@ -628,6 +651,38 @@ export default function PlantDetailScreen() {
             <Text style={styles.quickActionLabel}>{uploading ? 'Uploading' : 'Add Photo'}</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Secondary care actions — less frequent but real gardeners use these */}
+        <TouchableOpacity
+          style={styles.moreActionsToggle}
+          onPress={() => setShowMoreActions(!showMoreActions)}
+        >
+          <Text style={styles.moreActionsToggleText}>
+            {showMoreActions ? '▾ Fewer actions' : '▸ More actions'}
+          </Text>
+        </TouchableOpacity>
+
+        {showMoreActions && (
+          <View style={styles.secondaryActions}>
+            {([
+              { type: 'repotted',       icon: '🪴', label: 'Repotted' },
+              { type: 'pruned',         icon: '✂️',  label: 'Pruned' },
+              { type: 'misted',         icon: '💦', label: 'Misted' },
+              { type: 'pest_treatment', icon: '🐛', label: 'Pest Tx' },
+              { type: 'moved',          icon: '📍', label: 'Moved' },
+            ] as { type: CareLog['type']; icon: string; label: string }[]).map(action => (
+              <TouchableOpacity
+                key={action.type}
+                style={[styles.secondaryAction, loggingCare && styles.disabledButton]}
+                onPress={() => logCare(action.type)}
+                disabled={loggingCare}
+              >
+                <Text style={styles.secondaryActionIcon}>{action.icon}</Text>
+                <Text style={styles.secondaryActionLabel}>{action.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
 
         {/* Inline note input — appears below the quick-action bar when Note is tapped */}
         {showNoteInput && (
@@ -735,6 +790,37 @@ export default function PlantDetailScreen() {
           <View style={styles.notesSection}>
             <Text style={styles.sectionTitle}>Notes</Text>
             <Text style={styles.notesText}>{plant.notes}</Text>
+          </View>
+        ) : null}
+
+        {/* Plant details — location, pot, dates */}
+        {(plant?.location || plant?.pot_size || plant?.acquired_date || plant?.last_repotted_date) ? (
+          <View style={styles.detailsSection}>
+            <Text style={styles.sectionTitle}>Details</Text>
+            {plant.location ? (
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>📍 Location</Text>
+                <Text style={styles.detailValue}>{plant.location}</Text>
+              </View>
+            ) : null}
+            {plant.pot_size ? (
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>🪴 Pot size</Text>
+                <Text style={styles.detailValue}>{plant.pot_size}</Text>
+              </View>
+            ) : null}
+            {plant.acquired_date ? (
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>🗓 Acquired</Text>
+                <Text style={styles.detailValue}>{formatDate(plant.acquired_date)}</Text>
+              </View>
+            ) : null}
+            {plant.last_repotted_date ? (
+              <View style={styles.detailRow}>
+                <Text style={styles.detailLabel}>🪴 Last repotted</Text>
+                <Text style={styles.detailValue}>{formatDate(plant.last_repotted_date)}</Text>
+              </View>
+            ) : null}
           </View>
         ) : null}
 
@@ -927,6 +1013,44 @@ export default function PlantDetailScreen() {
           onChangeText={setSpecies}
           placeholder="e.g. Monstera deliciosa"
           placeholderTextColor="#aaa"
+        />
+
+        <Text style={styles.editLabel}>Location</Text>
+        <TextInput
+          style={styles.editInput}
+          value={location}
+          onChangeText={setLocation}
+          placeholder="e.g. Living room — east window"
+          placeholderTextColor="#aaa"
+        />
+
+        <Text style={styles.editLabel}>Pot size</Text>
+        <TextInput
+          style={styles.editInput}
+          value={potSize}
+          onChangeText={setPotSize}
+          placeholder="e.g. 6 inch terracotta"
+          placeholderTextColor="#aaa"
+        />
+
+        <Text style={styles.editLabel}>Date acquired</Text>
+        <TextInput
+          style={styles.editInput}
+          value={acquiredDate}
+          onChangeText={setAcquiredDate}
+          placeholder="YYYY-MM-DD"
+          placeholderTextColor="#aaa"
+          keyboardType="numbers-and-punctuation"
+        />
+
+        <Text style={styles.editLabel}>Last repotted</Text>
+        <TextInput
+          style={styles.editInput}
+          value={lastRepottedDate}
+          onChangeText={setLastRepottedDate}
+          placeholder="YYYY-MM-DD"
+          placeholderTextColor="#aaa"
+          keyboardType="numbers-and-punctuation"
         />
 
         <Text style={styles.editLabel}>Notes</Text>
@@ -1189,9 +1313,46 @@ const styles = StyleSheet.create({
   reminderChipText: { fontSize: 13, color: '#2d6a4f' },
   reminderChipTextActive: { color: '#fff', fontWeight: '600' },
 
+  // ── More actions toggle + secondary care row ──
+  moreActionsToggle: { paddingHorizontal: 16, paddingBottom: 10 },
+  moreActionsToggleText: { fontSize: 13, color: '#2d6a4f', fontWeight: '600' },
+  secondaryActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 12,
+    gap: 8,
+    marginBottom: 8,
+  },
+  secondaryAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    backgroundColor: '#f4faf7',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#d4eadf',
+    gap: 6,
+  },
+  secondaryActionIcon: { fontSize: 15 },
+  secondaryActionLabel: { fontSize: 13, color: '#2d6a4f', fontWeight: '500' },
+
   // ── Notes + meta ──
   notesSection: { paddingHorizontal: 16, marginBottom: 20 },
   notesText: { fontSize: 14, color: '#555', lineHeight: 22 },
+
+  // ── Plant details (location, pot, dates) ──
+  detailsSection: { paddingHorizontal: 16, marginBottom: 20 },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f4f4f4',
+  },
+  detailLabel: { fontSize: 13, color: '#888', flex: 1 },
+  detailValue: { fontSize: 13, color: '#333', flex: 2, textAlign: 'right' },
   metaSection: {
     paddingHorizontal: 16,
     marginBottom: 20,

@@ -277,6 +277,195 @@ Add a lightweight "what needs attention today" layer so the app becomes a daily 
 
 ---
 
+## Phase 11 — Critical UX Fixes ⬜
+A second-pass review (product manager + UI/UX + botanic veteran) surfaced several problems
+that need fixing before the app is ready to share with real users. These aren't polish —
+they are broken behaviors and first-impression failures.
+
+**Core diagnosis:**
+The app's architecture is strong but several everyday interactions are frustrating or broken.
+Notifications contradict in-app data. There's no account screen. Date inputs require a
+specific text format nobody knows. Care actions confirm nothing. The second tab is a dead end.
+And a new user has no idea what the app does until they've already struggled through setup.
+
+---
+
+### Phase 11A — Notifications Sync with Care Logging ⬜
+Currently, watering notifications are scheduled once when the user sets the interval and
+never updated. When a user logs "Watered", the in-app badge correctly recalculates from
+the care log, but the push notification still fires on the original schedule. The two
+systems give contradictory information, which is worse than having no notification at all.
+
+**Fix:** Every time a "watered" care log is saved, reschedule the watering notification from
+that date forward using the plant's current `watering_interval_days`. This keeps the
+notification in sync with actual care behavior.
+
+| Task | Status |
+|---|---|
+| Reschedule watering notification when "watered" care log is saved | ⬜ |
+| Verify notification fires at the correct time after mid-interval watering | ⬜ |
+| Handle the case where watering_interval_days is null (no notification to reschedule) | ⬜ |
+
+---
+
+### Phase 11B — Settings Screen & Account Management ⬜
+There is currently no Settings screen and no obvious way to sign out. Account management
+(sign out, password reset) must be accessible from normal navigation — not buried somewhere
+in the app.
+
+The Explore tab is a placeholder ("Plant Encyclopedia — Coming soon.") and has a paperplane
+icon that suggests nothing botanical. It should be replaced with a Settings tab that gives
+the app a proper home for account and app preferences.
+
+| Task | Status |
+|---|---|
+| Replace Explore tab with a Settings tab (leaf or gear icon) | ⬜ |
+| Settings screen: show signed-in email address | ⬜ |
+| Settings screen: Sign Out button | ⬜ |
+| Settings screen: app version / about section | ⬜ |
+
+---
+
+### Phase 11C — Date Pickers ⬜
+Acquisition date and last repotted date currently use raw text inputs that require
+"YYYY-MM-DD" format. This fails silently for most users and shows a jarring Alert on
+format errors. These should be native date pickers on both platforms.
+
+| Task | Status |
+|---|---|
+| Replace acquisition date text input with a date picker (Add Plant screen) | ⬜ |
+| Replace acquisition date and last repotted date text inputs in Plant Detail edit form | ⬜ |
+| Display stored dates in human-readable format (e.g. "March 15, 2024") throughout the app | ⬜ |
+
+---
+
+### Phase 11D — Care Action Feedback ⬜
+Tapping "Watered", "Fertilized", or any care action currently logs silently. There is no
+visual confirmation, haptic feedback, or animation. In a habit-forming app, the feedback
+*is* the reward — without it, users aren't sure the tap registered and the action feels
+meaningless. This is a small change with a large behavioral impact.
+
+| Task | Status |
+|---|---|
+| Brief success toast or confirmation message after logging any care action | ⬜ |
+| Haptic feedback (light tap) on care log actions (native only) | ⬜ |
+| Update watering badge immediately after logging "watered" (without requiring a screen refresh) | ⬜ |
+
+---
+
+### Phase 11E — First-Time User Experience ⬜
+A new user opens the app to "Your collection is empty" with a generic "Add Plant" button.
+Nothing explains what Viriditas does, why photos matter, or what they'll get from AI
+analysis. The value proposition is invisible until the user has already committed to setup.
+There is also no prompt to add a photo immediately after adding a plant — the first thing
+any plant needs for AI analysis.
+
+| Task | Status |
+|---|---|
+| Richer empty state: explain what Viriditas does and what to expect | ⬜ |
+| After "Add Plant" succeeds, navigate directly to that plant's detail screen (not back to the empty grid) | ⬜ |
+| On first visit to a plant with no photos, show a prominent "Add a photo to unlock AI analysis" prompt | ⬜ |
+
+---
+
+## Phase 12 — Depth & Botanical Intelligence ⬜
+With the critical UX fixes in place, these features make the app meaningfully better for
+anyone who takes plant care seriously. Each fills a gap that a real plant enthusiast would
+notice immediately.
+
+---
+
+### Phase 12A — Health Score & Trend Tracking ⬜
+The AI produces rich health text, but there's no structured number attached to each
+analysis. Over months of data, you can't tell whether a plant is improving or declining
+without reading through every history entry. A simple 1–5 health score per analysis
+makes trends visible at a glance and enables a health history chart over time.
+
+| Task | Status |
+|---|---|
+| Add `health_score` (integer 1–5) field to `analysis_results` table | ⬜ |
+| Update `analyze-plant` Edge Function prompt to also return a numeric health score | ⬜ |
+| Display health score badge on each analysis card in the History tab | ⬜ |
+| Show a simple health trend line or sparkline on the Overview tab (requires 3+ analyses) | ⬜ |
+
+---
+
+### Phase 12B — Fertilizing Reminder ⬜
+Users can log fertilizing events but there is no reminder infrastructure for it. Fertilizing
+is typically monthly or seasonal and very easy to forget. It deserves the same reminder
+system as watering — with a separate interval, a separate badge, and notification sync when
+fertilizing is logged.
+
+| Task | Status |
+|---|---|
+| Add `fertilizing_interval_days` column to the `plants` table | ⬜ |
+| Fertilizing reminder UI on Plant Detail screen (interval selector, same pattern as watering) | ⬜ |
+| Reschedule fertilizing notification when "fertilized" care log is saved | ⬜ |
+| Show fertilizing status badge on plant cards (overdue / due soon / good) | ⬜ |
+| Include fertilizing urgency in the My Plants grid urgency sort | ⬜ |
+
+---
+
+### Phase 12C — Soil Type Field ⬜
+Soil type is as important as pot size for determining watering frequency — a Monstera in
+fast-draining aroid mix needs water far more often than the same plant in dense peat. It
+was omitted from Phase 10C but belongs alongside pot size in the plant profile. It should
+also be passed to the AI as part of `plantContext`.
+
+| Task | Status |
+|---|---|
+| Add `soil_type` column to the `plants` table | ⬜ |
+| Soil type field in Add Plant screen and Plant Detail edit form | ⬜ |
+| Pass soil_type to analyze-plant Edge Function as part of plantContext | ⬜ |
+
+---
+
+### Phase 12D — Photo Management & Comparison ⬜
+Photos are the app's primary record of a plant's visual life — but the current implementation
+has two gaps. First, there's no way to delete a bad photo. Second, the whole value of
+taking photos over time (tracking recovery from pests, new growth, etc.) is underserved
+because there's no way to compare photos side by side.
+
+| Task | Status |
+|---|---|
+| Delete photo option (long-press or swipe gesture on photo thumbnail) | ⬜ |
+| Confirm before delete (cannot be undone) | ⬜ |
+| Side-by-side photo comparison: select any two photos from the plant's history | ⬜ |
+
+---
+
+### Phase 12E — Seasonal Awareness ⬜
+The app currently has no concept of seasons. Most houseplants need significantly less water
+in winter (slower growth, less evaporation, natural dormancy for some species). A fixed
+7-day interval set in July will over-water the same plant in December. The AI analyses
+don't proactively surface this unless it happens to come up in a specific prompt.
+
+| Task | Status |
+|---|---|
+| Pass current month/hemisphere to `analyze-plant` so AI can give season-appropriate advice | ⬜ |
+| Winter mode reminder: in Nov–Feb (northern hemisphere), surface a banner suggesting interval review | ⬜ |
+| Species profiles should include seasonal care notes (update `fetch-species-info` prompt) | ⬜ |
+
+---
+
+## Phase 13 — Power User & Scale Features ⬜
+These features matter once users have a real plant collection (10+ plants) and have been
+using the app daily for weeks. They're not needed for initial launch but will determine
+whether the app retains users long-term.
+
+| Feature | Notes |
+|---|---|
+| Search and filter on My Plants screen | Filter by room/location, species, watering status |
+| Plant tagging / grouping | Group plants by room, light level, or custom tag |
+| Multi-plant care summary | A single "All upcoming care" view across the whole collection |
+| Photo export | Download all photos for a plant as a zip or share sequence |
+| "Plant diary" — free text journal entries per plant | Distinct from care logs — for longer observations |
+| Soil amendment log type | Track soil changes, additives (perlite, bark, etc.) |
+| Pest/treatment detail fields | Which pest, what product, how many applications |
+| EAS Build — native Android/iOS | Full notification support, App Store distribution |
+
+---
+
 ## Notes & Decisions Log
 - **2026-03-26** — Tech stack chosen: Expo + Supabase + Anthropic Claude API
 - **2026-03-26** — Developer is on Mac, testing on Android
@@ -300,3 +489,4 @@ Add a lightweight "what needs attention today" layer so the app becomes a daily 
 - **2026-03-28** — Phase 10B complete: Plant Detail screen restructured from single long scroll into three-tab layout (Overview / History / Species). Fixed header with plant name always visible. Quick-action bar (Watered / Fertilized / Note / Add Photo) is the first interactive element on Overview — no scrolling required for common actions. History tab merges care logs and AI analyses into a unified chronological timeline with a dot-and-line visual. Species tab shows the full species profile without collapsing. Edit mode hides the tab bar and takes over the content area.
 - **2026-03-28** — Phase 9 complete: Viriditas deployed live on Vercel. Fixed two build-blocking issues: (1) missing @expo/metro-runtime, (2) `window is not defined` SSR crash caused by AsyncStorage being initialized in Node.js during Expo's static render pass — fixed by using `localStorage` on web. Post-deploy web UI fixes: JSX `//` comment rendered as visible text (fixed to `{/* */}`), internal scrollbar shown on plant detail (hidden with showsVerticalScrollIndicator={false}), content too narrow at 600px (increased to 800px).
 - **2026-03-29** — Phase 10D complete: My Plants screen gains "Today View" layer. Plants sorted by urgency (overdue → due-soon → good → unset). Attention banner split into separate overdue (red) and due-soon (amber) banners that stack when both conditions exist. Green "All caught up!" banner shown when all plants with reminders are in good status. Care streak chip added next to the "My Plants" title — computes consecutive calendar days with any logged care event (any plant, any action type) from a single query over the past year.
+- **2026-03-29** — Phase 10 retrospective + Phase 11/12/13 planning: Full product + UX + botanic review identified 12 gaps. Critical issues: (1) notifications decoupled from care logging — notification fires on original schedule even after mid-interval watering; (2) Explore tab is a dead placeholder "Coming soon" with no real content; (3) no Settings screen and no visible sign-out path; (4) date inputs require YYYY-MM-DD text entry with Alert errors; (5) care actions log silently with no feedback; (6) no onboarding for new users. Botanical gaps: seasonal blindness (fixed intervals don't adjust for winter), soil type missing from plant profile, health scores buried in prose with no trend visibility, fertilizing has no reminder infrastructure, photos can't be deleted or compared side by side. Phases 11/12/13 added to address in priority order.

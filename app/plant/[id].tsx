@@ -86,12 +86,15 @@ export default function PlantDetailScreen() {
     }, [id])
   )
 
-  // When we know the species (from DB or after analysis), load the cached profile
+  // When we know the species — either from the plants table (manually set) or from
+  // the latest analysis result — look up the cached species profile in the DB.
+  // latestAnalysis.species is the AI-identified name; plant.species is the user-set name.
   useEffect(() => {
-    if (plant?.species) {
-      fetchSpeciesProfileFromDB(plant.species)
+    const species = plant?.species || latestAnalysis?.species
+    if (species) {
+      fetchSpeciesProfileFromDB(species)
     }
-  }, [plant?.species])
+  }, [plant?.species, latestAnalysis?.species])
 
   // ── Data fetching ──────────────────────────────────────────────────────────
 
@@ -809,7 +812,7 @@ export default function PlantDetailScreen() {
   }
 
   function renderSpecies() {
-    // Still loading
+    // Still loading from scratch
     if (fetchingSpeciesProfile && !speciesProfile) {
       return (
         <View style={styles.emptyTab}>
@@ -819,8 +822,17 @@ export default function PlantDetailScreen() {
       )
     }
 
-    // Species not yet identified
-    if (!plant?.species) {
+    // The best known species name — prefer the manually-set field, fall back to
+    // the AI-identified species from the most recent analysis. plant.species is only
+    // populated if the user typed it in the Edit form; the AI saves to analysis_results.
+    const knownSpecies = plant?.species || latestAnalysis?.species
+
+    // We already have a profile in state — show it immediately.
+    // Check this before knownSpecies so we never block on a stale plant.species value.
+    if (speciesProfile) {
+      // falls through to the full profile render below
+    } else if (!knownSpecies) {
+      // No species identified yet at all
       return (
         <View style={styles.emptyTab}>
           <Text style={styles.emptyTabIcon}>🔍</Text>
@@ -830,17 +842,15 @@ export default function PlantDetailScreen() {
           </Text>
         </View>
       )
-    }
-
-    // Species known but profile not yet loaded
-    if (!speciesProfile) {
+    } else {
+      // Species is known from AI but profile hasn't been loaded yet
       return (
         <View style={styles.emptyTab}>
           <Text style={styles.emptyTabIcon}>📖</Text>
-          <Text style={styles.emptyTabTitle}>{plant.species}</Text>
+          <Text style={styles.emptyTabTitle}>{knownSpecies}</Text>
           <TouchableOpacity
             style={styles.fetchProfileButton}
-            onPress={() => fetchSpeciesProfileFromAI(plant.species!)}
+            onPress={() => fetchSpeciesProfileFromAI(knownSpecies)}
             disabled={fetchingSpeciesProfile}
           >
             <Text style={styles.fetchProfileText}>

@@ -104,6 +104,9 @@ viriditas/
 - [x] `analyze-plant` Edge Function — accepts `plantContext` (location, pot_size) and weaves it into the prompt
 - [x] `app/(tabs)/index.tsx` — Phase 10D Today View: plants sorted by urgency (overdue → due-soon → good → unset); separate overdue (red) and due-soon (amber) banners; green "All caught up!" banner when nothing is overdue; care streak chip (🔥 N-day streak) computed from all care_logs in the past year
 - [x] `app/plant/[id].tsx` — Phase 11A: watering notification auto-rescheduled when "watered" care log is saved; `rescheduleWateringNotification()` cancels old notification and schedules fresh one from now; silently no-ops when no interval is set or in Expo Go/web
+- [x] `app/(tabs)/settings.tsx` — Phase 11B: Settings screen with signed-in email, Sign Out button (confirmation Alert → supabase.auth.signOut()), and About section
+- [x] `app/(tabs)/_layout.tsx` — Explore tab replaced with Settings tab (gearshape.fill icon); Home tab relabelled "My Plants"
+- [x] `components/ui/icon-symbol.tsx` — Added gearshape.fill → settings mapping for Android/web
 
 ## What Comes Next
 See ROADMAP.md for the full feature breakdown and phase plan.

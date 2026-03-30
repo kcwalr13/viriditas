@@ -256,7 +256,33 @@ export default function PlantDetailScreen() {
 
   // ── Care logs ──────────────────────────────────────────────────────────────
 
-  // Log a care event — type is 'watered', 'fertilized', or 'note'
+  // Reschedule the watering notification from NOW forward.
+  // Called automatically after logging "watered" so the notification reflects
+  // actual care timing rather than firing on the original schedule from when
+  // the reminder was first set. This keeps the push alert in sync with the
+  // in-app watering badge, which already recalculates from care_logs.
+  // Silently no-ops if notifications aren't supported (Expo Go / web).
+  async function rescheduleWateringNotification(days: number) {
+    try {
+      const existingId = await AsyncStorage.getItem(reminderKey(id))
+      if (existingId) await cancelNotification(existingId)
+
+      const notificationId = await scheduleWateringReminder(
+        plant?.nickname ?? 'Your plant',
+        days
+      )
+      if (notificationId) {
+        await AsyncStorage.setItem(reminderKey(id), notificationId)
+      }
+    } catch {
+      // Non-critical — notification sync failure should never interrupt care logging
+      console.log('[Plant] Failed to reschedule watering notification after care log')
+    }
+  }
+
+  // Log a care event. After logging "watered", the watering notification is
+  // automatically rescheduled from the current time so the push alert stays
+  // in sync with the in-app watering badge.
   async function logCare(type: CareLog['type'], customNote?: string) {
     setLoggingCare(true)
     try {
@@ -268,6 +294,13 @@ export default function PlantDetailScreen() {
         notes: customNote ?? null,
       })
       if (error) throw error
+
+      // Resync the watering notification to fire relative to the actual watering
+      // date, not the original schedule. Only relevant when an interval is set.
+      if (type === 'watered' && plant?.watering_interval_days) {
+        await rescheduleWateringNotification(plant.watering_interval_days)
+      }
+
       await fetchCareLogs()
     } catch {
       Alert.alert('Error', 'Could not save care log.')

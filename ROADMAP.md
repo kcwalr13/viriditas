@@ -277,7 +277,7 @@ Add a lightweight "what needs attention today" layer so the app becomes a daily 
 
 ---
 
-## Phase 11 — Critical UX Fixes ⬜
+## Phase 11 — Critical UX Fixes 🔄
 A second-pass review (product manager + UI/UX + botanic veteran) surfaced several problems
 that need fixing before the app is ready to share with real users. These aren't polish —
 they are broken behaviors and first-impression failures.
@@ -290,7 +290,7 @@ And a new user has no idea what the app does until they've already struggled thr
 
 ---
 
-### Phase 11A — Notifications Sync with Care Logging ⬜
+### Phase 11A — Notifications Sync with Care Logging ✅
 Currently, watering notifications are scheduled once when the user sets the interval and
 never updated. When a user logs "Watered", the in-app badge correctly recalculates from
 the care log, but the push notification still fires on the original schedule. The two
@@ -302,9 +302,9 @@ notification in sync with actual care behavior.
 
 | Task | Status |
 |---|---|
-| Reschedule watering notification when "watered" care log is saved | ⬜ |
-| Verify notification fires at the correct time after mid-interval watering | ⬜ |
-| Handle the case where watering_interval_days is null (no notification to reschedule) | ⬜ |
+| Reschedule watering notification when "watered" care log is saved | ✅ |
+| Verify notification fires at the correct time after mid-interval watering | ✅ |
+| Handle the case where watering_interval_days is null (no notification to reschedule) | ✅ |
 
 ---
 
@@ -489,4 +489,5 @@ whether the app retains users long-term.
 - **2026-03-28** — Phase 10B complete: Plant Detail screen restructured from single long scroll into three-tab layout (Overview / History / Species). Fixed header with plant name always visible. Quick-action bar (Watered / Fertilized / Note / Add Photo) is the first interactive element on Overview — no scrolling required for common actions. History tab merges care logs and AI analyses into a unified chronological timeline with a dot-and-line visual. Species tab shows the full species profile without collapsing. Edit mode hides the tab bar and takes over the content area.
 - **2026-03-28** — Phase 9 complete: Viriditas deployed live on Vercel. Fixed two build-blocking issues: (1) missing @expo/metro-runtime, (2) `window is not defined` SSR crash caused by AsyncStorage being initialized in Node.js during Expo's static render pass — fixed by using `localStorage` on web. Post-deploy web UI fixes: JSX `//` comment rendered as visible text (fixed to `{/* */}`), internal scrollbar shown on plant detail (hidden with showsVerticalScrollIndicator={false}), content too narrow at 600px (increased to 800px).
 - **2026-03-29** — Phase 10D complete: My Plants screen gains "Today View" layer. Plants sorted by urgency (overdue → due-soon → good → unset). Attention banner split into separate overdue (red) and due-soon (amber) banners that stack when both conditions exist. Green "All caught up!" banner shown when all plants with reminders are in good status. Care streak chip added next to the "My Plants" title — computes consecutive calendar days with any logged care event (any plant, any action type) from a single query over the past year.
+- **2026-03-29** — Phase 11A complete: Watering notifications now reschedule automatically when a "watered" care log is saved. Added `rescheduleWateringNotification()` helper in Plant Detail screen — cancels existing notification, schedules a fresh one from the current time using the plant's stored interval, updates AsyncStorage with the new ID. Silently no-ops when `watering_interval_days` is null or when running in Expo Go/web. Care log success path unchanged; notification failure is non-fatal and never blocks the log from being saved.
 - **2026-03-29** — Phase 10 retrospective + Phase 11/12/13 planning: Full product + UX + botanic review identified 12 gaps. Critical issues: (1) notifications decoupled from care logging — notification fires on original schedule even after mid-interval watering; (2) Explore tab is a dead placeholder "Coming soon" with no real content; (3) no Settings screen and no visible sign-out path; (4) date inputs require YYYY-MM-DD text entry with Alert errors; (5) care actions log silently with no feedback; (6) no onboarding for new users. Botanical gaps: seasonal blindness (fixed intervals don't adjust for winter), soil type missing from plant profile, health scores buried in prose with no trend visibility, fertilizing has no reminder infrastructure, photos can't be deleted or compared side by side. Phases 11/12/13 added to address in priority order.

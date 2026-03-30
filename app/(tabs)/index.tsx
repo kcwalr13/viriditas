@@ -1,7 +1,10 @@
 // app/(tabs)/index.tsx
 // My Plants screen — shows the user's plant collection as a visual photo grid.
-// Each card shows the plant's cover photo, nickname, species, and watering status.
-// A banner at the top calls out any plants that need water today.
+// Phase 10D additions:
+//   - Plants sorted by watering urgency (overdue first, then due-soon, then the rest)
+//   - Smarter attention banner: shows overdue and due-soon counts separately
+//   - "All caught up!" positive state when no plants need water
+//   - Care streak tracking: consecutive days with at least one logged care event
 
 import { Image } from 'expo-image'
 import { LinearGradient } from 'expo-linear-gradient'
@@ -31,17 +34,13 @@ type PlantCard = Plant & {
 // ── Watering status logic ──────────────────────────────────────────────────
 
 // Computes watering status from the plant's interval and last-watered date.
-// This is used to drive the badge color and label on each card.
 function computeWateringStatus(
   plant: Plant,
   lastWateredAt: string | null
 ): { status: WateringStatus; daysUntilWater: number | null } {
-  // No reminder interval set → don't show any badge
   if (!plant.watering_interval_days) {
     return { status: 'unset', daysUntilWater: null }
   }
-
-  // Has an interval but has never been logged as watered → treat as overdue
   if (!lastWateredAt) {
     return { status: 'overdue', daysUntilWater: null }
   }
@@ -51,7 +50,6 @@ function computeWateringStatus(
     lastWatered.getTime() + plant.watering_interval_days * 24 * 60 * 60 * 1000
   )
   const msUntil = nextWatering.getTime() - Date.now()
-  // Round up so "due today" shows as 0 rather than -a-few-hours
   const daysUntil = Math.ceil(msUntil / (24 * 60 * 60 * 1000))
 
   if (daysUntil < 0) return { status: 'overdue', daysUntilWater: daysUntil }
@@ -74,8 +72,68 @@ function badgeLabel(status: WateringStatus, daysUntil: number | null): string {
   if (status === 'due-soon') {
     return daysUntil === 0 ? 'Water today' : 'Water tomorrow'
   }
-  // 'good' — show days remaining as a quiet indicator
   return daysUntil !== null ? `💧 ${daysUntil}d` : ''
+}
+
+// ── Streak helpers ─────────────────────────────────────────────────────────
+
+// Convert any timestamp to a YYYY-MM-DD string in the user's local timezone.
+// new Date(isoStr).getFullYear/Month/Date all use local time — consistent with
+// how the user experiences their day.
+function toLocalDateStr(isoStr: string): string {
+  const d = new Date(isoStr)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+// Compute the number of consecutive calendar days (in local timezone) that had
+// at least one logged care event, counting backwards from today.
+// A streak of 1 means: only today (or only yesterday, if today has no care yet).
+// We don't penalise for not having logged care YET today — the day isn't over.
+function computeStreak(logTimestamps: string[]): number {
+  if (logTimestamps.length === 0) return 0
+
+  // Deduplicate into a Set of local date strings
+  const dateSet = new Set(logTimestamps.map(toLocalDateStr))
+
+  const todayStr = toLocalDateStr(new Date().toISOString())
+
+  // Helper to subtract N days from a local date string
+  function subtractDay(dateStr: string, n = 1): string {
+    const d = new Date(dateStr)
+    d.setDate(d.getDate() - n)
+    return toLocalDateStr(d.toISOString())
+  }
+
+  // If today isn't logged yet, check if yesterday was — the streak could still
+  // be alive (e.g. it's 8am and you haven't done anything today yet).
+  let checkDate = todayStr
+  if (!dateSet.has(checkDate)) {
+    checkDate = subtractDay(checkDate)
+    if (!dateSet.has(checkDate)) return 0  // no recent care at all
+  }
+
+  // Count consecutive days backwards from checkDate
+  let streak = 0
+  while (dateSet.has(checkDate)) {
+    streak++
+    checkDate = subtractDay(checkDate)
+  }
+
+  return streak
+}
+
+// ── Urgency sort ───────────────────────────────────────────────────────────
+
+// Sort order: overdue first, then due-soon, then good, then unset.
+// Plants within each tier keep their original order (newest created first).
+const URGENCY_ORDER: Record<WateringStatus, number> = {
+  overdue: 0,
+  'due-soon': 1,
+  good: 2,
+  unset: 3,
 }
 
 // ── Screen ─────────────────────────────────────────────────────────────────
@@ -83,9 +141,9 @@ function badgeLabel(status: WateringStatus, daysUntil: number | null): string {
 export default function MyPlantsScreen() {
   const [plants, setPlants] = useState<PlantCard[]>([])
   const [loading, setLoading] = useState(true)
+  const [careStreak, setCareStreak] = useState(0)
   const router = useRouter()
 
-  // Refresh whenever this screen comes back into focus
   useFocusEffect(
     useCallback(() => {
       fetchPlants()
@@ -108,21 +166,20 @@ export default function MyPlantsScreen() {
     if (plantData.length === 0) {
       setPlants([])
       setLoading(false)
+      // Still compute streak even with no plants
+      await fetchStreak()
       return
     }
 
     const plantIds = plantData.map(p => p.id)
 
     // ── Step 2: fetch the most recent photo path for each plant ────────────
-    // One query returns all photos ordered newest-first. We then take the
-    // first occurrence of each plant_id to get the cover photo.
     const { data: photoData } = await supabase
       .from('photos')
       .select('plant_id, storage_path')
       .in('plant_id', plantIds)
       .order('created_at', { ascending: false })
 
-    // Build a map: plant_id → storage_path of cover photo
     const coverPaths: Record<string, string> = {}
     for (const photo of photoData || []) {
       if (!coverPaths[photo.plant_id]) {
@@ -130,7 +187,6 @@ export default function MyPlantsScreen() {
       }
     }
 
-    // Convert storage paths to public URLs (synchronous — no API call)
     const coverUrls: Record<string, string> = {}
     for (const [plantId, path] of Object.entries(coverPaths)) {
       const { data: urlData } = supabase.storage
@@ -147,7 +203,6 @@ export default function MyPlantsScreen() {
       .eq('type', 'watered')
       .order('logged_at', { ascending: false })
 
-    // Build a map: plant_id → most recent watered timestamp
     const lastWateredMap: Record<string, string> = {}
     for (const log of waterData || []) {
       if (!lastWateredMap[log.plant_id]) {
@@ -155,7 +210,7 @@ export default function MyPlantsScreen() {
       }
     }
 
-    // ── Step 4: assemble enriched plant cards ──────────────────────────────
+    // ── Step 4: assemble enriched plant cards, sorted by urgency ──────────
     const enriched: PlantCard[] = plantData.map(plant => {
       const lastWateredAt = lastWateredMap[plant.id] ?? null
       const { status, daysUntilWater } = computeWateringStatus(plant, lastWateredAt)
@@ -168,14 +223,41 @@ export default function MyPlantsScreen() {
       }
     })
 
+    // Sort so most urgent plants appear first — stable sort preserves creation
+    // order within each urgency tier
+    enriched.sort((a, b) =>
+      URGENCY_ORDER[a.wateringStatus] - URGENCY_ORDER[b.wateringStatus]
+    )
+
     setPlants(enriched)
     setLoading(false)
+
+    // Fetch care streak independently (doesn't block the plant grid from rendering)
+    await fetchStreak()
   }
 
-  // Count plants that need watering now or very soon
-  const needsAttentionCount = plants.filter(
-    p => p.wateringStatus === 'overdue' || p.wateringStatus === 'due-soon'
-  ).length
+  // Fetch all care log timestamps from the past year to compute the streak.
+  // Any care action on any plant counts — the streak rewards daily engagement.
+  async function fetchStreak() {
+    const oneYearAgo = new Date()
+    oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1)
+
+    const { data: careData } = await supabase
+      .from('care_logs')
+      .select('logged_at')
+      .gte('logged_at', oneYearAgo.toISOString())
+      .order('logged_at', { ascending: false })
+
+    const streak = computeStreak((careData || []).map(l => l.logged_at))
+    setCareStreak(streak)
+  }
+
+  // ── Derived display state ──────────────────────────────────────────────
+  const overdueCount  = plants.filter(p => p.wateringStatus === 'overdue').length
+  const dueSoonCount  = plants.filter(p => p.wateringStatus === 'due-soon').length
+  const hasReminders  = plants.some(p => p.watering_interval_days)
+  // "All caught up" = at least one reminder is set AND nothing is overdue or due-soon
+  const allCaughtUp   = hasReminders && overdueCount === 0 && dueSoonCount === 0
 
   if (loading) {
     return (
@@ -194,14 +276,46 @@ export default function MyPlantsScreen() {
       >
         {/* ── Header ────────────────────────────────────────────────────── */}
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>My Plants</Text>
+          <View style={styles.headerRow}>
+            <Text style={styles.headerTitle}>My Plants</Text>
 
-          {/* Attention banner — shown when one or more plants need water */}
-          {needsAttentionCount > 0 && (
-            <View style={styles.attentionBanner}>
-              <Text style={styles.attentionText}>
-                💧 {needsAttentionCount}{' '}
-                {needsAttentionCount === 1 ? 'plant needs' : 'plants need'} water
+            {/* Care streak chip — only shown when streak >= 1 */}
+            {careStreak > 0 && (
+              <View style={styles.streakChip}>
+                <Text style={styles.streakText}>
+                  {careStreak === 1
+                    ? '🌿 Today'
+                    : `🔥 ${careStreak}-day streak`}
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* ── Attention banners ─────────────────────────────────────── */}
+
+          {/* Overdue banner — highest urgency */}
+          {overdueCount > 0 && (
+            <View style={[styles.attentionBanner, styles.bannerOverdue]}>
+              <Text style={[styles.attentionText, styles.bannerOverdueText]}>
+                🚨 {overdueCount} {overdueCount === 1 ? 'plant is' : 'plants are'} overdue for water
+              </Text>
+            </View>
+          )}
+
+          {/* Due-soon banner — shown below overdue if any */}
+          {dueSoonCount > 0 && (
+            <View style={[styles.attentionBanner, styles.bannerDueSoon]}>
+              <Text style={[styles.attentionText, styles.bannerDueSoonText]}>
+                💧 {dueSoonCount} {dueSoonCount === 1 ? 'plant needs' : 'plants need'} water today or tomorrow
+              </Text>
+            </View>
+          )}
+
+          {/* "All caught up" — shown when reminders exist and nothing is overdue */}
+          {allCaughtUp && (
+            <View style={[styles.attentionBanner, styles.bannerGood]}>
+              <Text style={[styles.attentionText, styles.bannerGoodText]}>
+                ✅ All caught up — your plants are happy!
               </Text>
             </View>
           )}
@@ -217,7 +331,7 @@ export default function MyPlantsScreen() {
             </Text>
           </View>
         ) : (
-          /* ── Photo grid ─────────────────────────────────────────────── */
+          /* ── Photo grid — sorted by urgency ─────────────────────────── */
           <View style={styles.grid}>
             {plants.map(plant => {
               const colors = badgeColors(plant.wateringStatus)
@@ -232,7 +346,6 @@ export default function MyPlantsScreen() {
                     onPress={() => router.push(`/plant/${plant.id}`)}
                     activeOpacity={0.88}
                   >
-                    {/* Background: photo or green placeholder */}
                     {plant.coverPhotoUrl ? (
                       <Image
                         source={{ uri: plant.coverPhotoUrl }}
@@ -245,7 +358,6 @@ export default function MyPlantsScreen() {
                       </View>
                     )}
 
-                    {/* Gradient fade from transparent → dark so text is legible over any photo */}
                     <LinearGradient
                       colors={['transparent', 'rgba(0,0,0,0.72)']}
                       start={{ x: 0, y: 0.35 }}
@@ -253,7 +365,6 @@ export default function MyPlantsScreen() {
                       style={StyleSheet.absoluteFillObject}
                     />
 
-                    {/* Watering status badge — top right corner */}
                     {label !== '' && (
                       <View style={[styles.badge, { backgroundColor: colors.bg }]}>
                         <Text style={[styles.badgeText, { color: colors.text }]}>
@@ -262,7 +373,6 @@ export default function MyPlantsScreen() {
                       </View>
                     )}
 
-                    {/* Plant name and species — bottom of card */}
                     <View style={styles.cardInfo}>
                       <Text style={styles.cardNickname} numberOfLines={1}>
                         {plant.nickname}
@@ -281,7 +391,7 @@ export default function MyPlantsScreen() {
         )}
       </ScrollView>
 
-      {/* Floating "Add Plant" button — always visible over content */}
+      {/* Floating "Add Plant" button */}
       <TouchableOpacity
         style={styles.addButton}
         onPress={() => router.push('/add-plant')}
@@ -294,8 +404,8 @@ export default function MyPlantsScreen() {
 
 // ── Styles ─────────────────────────────────────────────────────────────────
 
-const GRID_PADDING = 16   // horizontal padding around the grid
-const CARD_GAP = 10       // space between cards (half applied to each side)
+const GRID_PADDING = 16
+const CARD_GAP = 10
 
 const styles = StyleSheet.create({
   centered: {
@@ -306,7 +416,7 @@ const styles = StyleSheet.create({
     flex: 1, backgroundColor: '#f8faf9',
   },
   scrollContent: {
-    paddingBottom: 110,  // room for the floating Add button
+    paddingBottom: 110,
   },
 
   // ── Header
@@ -316,22 +426,68 @@ const styles = StyleSheet.create({
     paddingBottom: 16,
     backgroundColor: '#f8faf9',
   },
+
+  // Title + streak chip on the same row
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
   headerTitle: {
     fontSize: 32, fontWeight: 'bold', color: '#2d6a4f',
   },
 
-  // Attention banner — shown when plants need water
+  // Streak chip — sits to the right of the title
+  streakChip: {
+    backgroundColor: '#e8f5ee',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#b7d9c6',
+  },
+  streakText: {
+    fontSize: 13, fontWeight: '700', color: '#2d6a4f',
+  },
+
+  // ── Attention banners (stacked when both overdue + due-soon exist)
   attentionBanner: {
-    marginTop: 12,
-    backgroundColor: '#fff8e8',
+    marginTop: 10,
     borderRadius: 12,
     paddingVertical: 11,
     paddingHorizontal: 16,
     borderWidth: 1,
-    borderColor: '#f0c060',
   },
   attentionText: {
-    fontSize: 14, color: '#8a5d00', fontWeight: '600',
+    fontSize: 14, fontWeight: '600',
+  },
+
+  // Overdue: red
+  bannerOverdue: {
+    backgroundColor: '#fff0f0',
+    borderColor: '#f5b8b8',
+  },
+  bannerOverdueText: {
+    color: '#b03030',
+  },
+
+  // Due-soon: amber
+  bannerDueSoon: {
+    backgroundColor: '#fff8e8',
+    borderColor: '#f0c060',
+  },
+  bannerDueSoonText: {
+    color: '#8a5d00',
+  },
+
+  // All caught up: green
+  bannerGood: {
+    backgroundColor: '#edfaf3',
+    borderColor: '#9fd3b8',
+  },
+  bannerGoodText: {
+    color: '#1f6b47',
   },
 
   // ── Empty state
@@ -357,21 +513,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: GRID_PADDING - CARD_GAP / 2,
   },
 
-  // Each card takes half the grid width; padding creates the gap between cards
   cardOuter: {
     width: '50%',
     padding: CARD_GAP / 2,
   },
 
-  // The inner container clips the photo to rounded corners
   cardInner: {
-    aspectRatio: 3 / 4,   // portrait ratio — taller than wide, suits plant photos
+    aspectRatio: 3 / 4,
     borderRadius: 16,
     overflow: 'hidden',
-    backgroundColor: '#d4eadf',  // fallback color while photo loads
+    backgroundColor: '#d4eadf',
   },
 
-  // Placeholder shown when no photo has been added yet
   placeholder: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: '#e8f5ee',
@@ -382,9 +535,6 @@ const styles = StyleSheet.create({
     fontSize: 48,
   },
 
-  // (gradient is handled by the LinearGradient component, no style needed here)
-
-  // Watering status badge — sits in the top-right corner of the card
   badge: {
     position: 'absolute',
     top: 10, right: 10,
@@ -396,7 +546,6 @@ const styles = StyleSheet.create({
     fontSize: 11, fontWeight: '700',
   },
 
-  // Plant info at the bottom of the card, over the gradient
   cardInfo: {
     position: 'absolute',
     bottom: 0, left: 0, right: 0,

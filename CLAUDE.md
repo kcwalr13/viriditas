@@ -95,6 +95,14 @@ viriditas/
 - [x] Web SSR crash fixed: `lib/supabase.ts` uses `Platform.OS === 'web'` to avoid AsyncStorage during Expo's Node.js static render pass
 - [x] Web UI fixes: JSX comment rendering bug fixed; scrollbar hidden on plant detail; max-width increased to 800px
 - [x] `app/(tabs)/index.tsx` — My Plants rebuilt as 2-column photo grid with watering status badges and attention banner
+- [x] `app/plant/[id].tsx` — Plant Detail rebuilt as tabbed layout (Overview / History / Species); fixed header; quick-action bar always visible
+- [x] History tab — unified timeline merging care logs and AI analyses, sorted newest first
+- [x] Species tab — full species profile without collapsing; uses `latestAnalysis?.species` fallback so it works even when `plants.species` is null
+- [x] Five new care log types: repotted, pruned, misted, pest_treatment, moved — behind a collapsible "More actions" row
+- [x] Four new `plants` table columns: `location`, `pot_size`, `acquired_date`, `last_repotted_date`
+- [x] `app/add-plant.tsx` — location and acquisition date fields added
+- [x] `analyze-plant` Edge Function — accepts `plantContext` (location, pot_size) and weaves it into the prompt
+- [x] `app/(tabs)/index.tsx` — Phase 10D Today View: plants sorted by urgency (overdue → due-soon → good → unset); separate overdue (red) and due-soon (amber) banners; green "All caught up!" banner when nothing is overdue; care streak chip (🔥 N-day streak) computed from all care_logs in the past year
 
 ## What Comes Next
 See ROADMAP.md for the full feature breakdown and phase plan.
@@ -103,9 +111,9 @@ See ROADMAP.md for the full feature breakdown and phase plan.
 Each plant in Viriditas has two layers of information that together form its complete profile:
 
 **Layer 1 — Personal data (user-specific, evolves over time):**
-- Nickname, notes, and photos added by the user
+- Nickname, notes, location, pot size, acquisition date, last repotted date, and photos
 - AI health analyses and species identifications over time
-- Care logs (watered, fertilized, notes)
+- Care logs (watered, fertilized, note, repotted, pruned, misted, pest_treatment, moved)
 - Watering reminder interval
 
 **Layer 2 — Species reference data (encyclopedic, fetched once and cached permanently):**
@@ -148,7 +156,9 @@ requirements are — before it even looks at the photo.
 - AI API keys must never be in frontend code — they belong in a Supabase Edge Function as secrets
 - Supabase email confirmation is currently disabled (for development); re-enable before launch
 - **Expo Router 6 auth gating:** `useSegments()` and `usePathname()` are unreliable during initial render. Use pure session-based routing in `_layout.tsx` — redirect to `/(tabs)` if session exists, `/(auth)/sign-in` if not. The effect only re-runs when session/loading changes, so it won't interrupt sign-up navigation.
-- **Uploading images to Supabase Storage:** React Native's `Blob` does not support `.arrayBuffer()`. Always use `base64: true` in ImagePicker options, then decode manually: `atob(base64)` → `Uint8Array` → `.buffer` for the upload call.
+- **Uploading images to Supabase Storage:** React Native's `Blob` does not support `.arrayBuffer()`. Always use `base64: true` in ImagePicker options, then decode manually: `atob(base64)` → `Uint8Array` → `.buffer` for the upload call. Always pass `asset.mimeType` (not a hardcoded `'image/jpeg'`) as the `contentType` in the upload options — browsers commonly produce WebP, and a mismatched content type will cause the Claude API to reject the image during analysis.
+- **Image format detection in Edge Functions:** Never trust the `Content-Type` header from Supabase Storage — it reflects whatever was declared at upload time and may be wrong. Instead, detect the real format from magic bytes: WebP starts with `RIFF....WEBP` (bytes 0–3 and 8–11), PNG with `\x89PNG`, GIF with `GIF8`, JPEG with `\xFF\xD8\xFF`. See `fetchImageAsBase64` in `analyze-plant/index.ts` for the implementation.
+- **Zsh glob issue with dynamic route filenames:** In zsh, `git add app/plant/[id].tsx` fails because `[id]` is treated as a glob pattern. Always quote the path: `git add 'app/plant/[id].tsx'`.
 - **AI Edge Function invocation:** `supabase.functions.invoke` does not reliably inject the auth token in React Native. Always get the session explicitly and pass it: `const { data: { session } } = await supabase.auth.getSession()`, then pass `headers: { Authorization: \`Bearer ${session.access_token}\` }`.
 - **Edge Function deployment:** Deploy with `--no-verify-jwt` flag (`supabase functions deploy analyze-plant --no-verify-jwt`) — the function does its own auth via the explicitly passed token. Standard JWT verification at the gateway level fails in React Native.
 - **AI provider switching:** Controlled by the `AI_PROVIDER` Supabase secret. Set to `claude` (current) or `gemini`. Requires a redeploy after changing. Claude model: `claude-haiku-4-5-20251001`. Gemini model: `gemini-2.5-flash`.
@@ -161,3 +171,8 @@ requirements are — before it even looks at the photo.
 - **ScrollView on web:** Add `showsVerticalScrollIndicator={false}` to ScrollViews in screens wrapped with PageContainer. This suppresses the internal scrollbar track, which looks out of place in a browser. Content is still fully scrollable via mouse wheel and trackpad.
 - **Photo grid pattern:** Use `flexDirection: 'row', flexWrap: 'wrap'` on a View for a 2-column grid. Each card uses `width: '50%'` with padding for gutters. Use a `cardOuter` (width + padding) + `cardInner` (aspectRatio + borderRadius + overflow: hidden) two-layer structure so the border radius clips the photo correctly. Use `StyleSheet.absoluteFillObject` on the Image for full-bleed background photos.
 - **Enriching plant list data efficiently:** Fetch plants, then fetch photos and care_logs with `.in('plant_id', plantIds)` — 3 total queries regardless of collection size. Build lookup maps in JavaScript (first occurrence per plant_id = most recent, since queries are ordered descending).
+- **care_logs type constraint:** The `type` column on `care_logs` has a CHECK constraint. If you add new care log types, run `ALTER TABLE care_logs DROP CONSTRAINT IF EXISTS care_logs_type_check; ALTER TABLE care_logs ADD CONSTRAINT care_logs_type_check CHECK (type IN (...all values...));` in the Supabase SQL editor. Current allowed values: `watered`, `fertilized`, `note`, `repotted`, `pruned`, `misted`, `pest_treatment`, `moved`.
+- **Two species fields — don't conflate them:** `plants.species` is set only when the user manually types a species in the Edit form. `analysis_results.species` is what the AI identified. Always check both when species is needed: `const knownSpecies = plant?.species || latestAnalysis?.species`. Using only `plant.species` will make species-dependent UI appear broken even after a successful analysis.
+- **In-screen tab pattern:** Use a custom tab bar (row of `TouchableOpacity` items with a bottom border indicator) + a single `ScrollView` whose content switches on an `activeTab` state variable. This is distinct from Expo Router's file-based bottom tab navigator. Active tab uses `borderBottomColor: '#2d6a4f'`; inactive tabs use `'transparent'`.
+- **Care streak computation:** `new Date(isoStr).getFullYear/getMonth/getDate` all return local time, so converting UTC timestamps to YYYY-MM-DD using these methods gives local-timezone dates. Use this approach (not `toISOString().split('T')[0]`) to avoid day-boundary bugs in non-UTC timezones. A streak counts consecutive local calendar days with any care log. If today has no care yet, the streak is still "alive" if yesterday was logged — check yesterday before returning 0.
+- **Urgency sort on plant grid:** Sort the enriched PlantCard array with `statusOrder = { overdue: 0, 'due-soon': 1, good: 2, unset: 3 }` before setting state. JavaScript's `Array.sort` is stable in V8/Hermes, so plants within each tier keep their original creation order.

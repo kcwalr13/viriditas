@@ -235,43 +235,45 @@ and a watering status badge. A banner at the top flags plants that need attentio
 
 ---
 
-### Phase 10B — Plant Detail Restructure ⬜
+### Phase 10B — Plant Detail Restructure ✅
 Reorganize the long-scroll plant detail into a tabbed layout. Make care actions
 immediately accessible without scrolling.
 
 | Task | Status |
 |---|---|
-| Tab layout: Overview / Care History / Species Guide | ⬜ |
-| Overview tab: hero photo gallery, quick-action bar, latest analysis summary | ⬜ |
-| Care History tab: unified chronological timeline (logs + analyses combined) | ⬜ |
-| Species Guide tab: full species profile in its own space | ⬜ |
-| Quick-action bar (Water / Fertilize / Note) always visible on Overview | ⬜ |
+| Tab layout: Overview / History / Species | ✅ |
+| Overview tab: full-width hero photo, 4-button quick-action bar, analyze button, latest analysis card, watering reminder | ✅ |
+| History tab: unified chronological timeline (care logs + analyses merged, sorted newest first) | ✅ |
+| Species tab: full species profile, all fields visible without collapsing, refresh button | ✅ |
+| Quick-action bar (Watered / Fertilized / Note / Add Photo) always visible at top of Overview | ✅ |
+| Fixed header with plant name, species, and Edit button always visible across all tabs | ✅ |
+| Edit mode replaces tab content; tab bar hidden during edit for focus | ✅ |
 
 ---
 
-### Phase 10C — Richer Plant Data ⬜
+### Phase 10C — Richer Plant Data ✅
 Add fields and care log types that real gardeners actually track.
 
 | Task | Status |
 |---|---|
-| Additional care log types: repotted, pruned, misted, pest treatment, moved | ⬜ |
-| Plant location field (e.g. "Living room — east window") | ⬜ |
-| Pot size field | ⬜ |
-| Acquisition date field | ⬜ |
-| Last repotted date field | ⬜ |
-| Location and pot data passed as context to AI analysis | ⬜ |
+| Additional care log types: repotted, pruned, misted, pest treatment, moved | ✅ |
+| Plant location field (e.g. "Living room — east window") | ✅ |
+| Pot size field | ✅ |
+| Acquisition date field | ✅ |
+| Last repotted date field | ✅ |
+| Location and pot data passed as context to AI analysis | ✅ |
 
 ---
 
-### Phase 10D — Today View ⬜
+### Phase 10D — Today View ✅
 Add a lightweight "what needs attention today" layer so the app becomes a daily habit.
 
 | Task | Status |
 |---|---|
-| Plants due for water shown prominently at top of collection | ⬜ |
-| Overdue watering shown distinctly from "due today" | ⬜ |
-| "All caught up" positive state when nothing is overdue | ⬜ |
-| Care streak tracking (consecutive days with logged care) | ⬜ |
+| Plants due for water shown prominently at top of collection | ✅ |
+| Overdue watering shown distinctly from "due today" | ✅ |
+| "All caught up" positive state when nothing is overdue | ✅ |
+| Care streak tracking (consecutive days with logged care) | ✅ |
 
 ---
 
@@ -294,4 +296,7 @@ Add a lightweight "what needs attention today" layer so the app becomes a daily 
 - **2026-03-27** — Phase 8 complete: species_profiles table created; fetch-species-info Edge Function deployed (Claude-powered, provider-swappable, forceRefresh support); species profile auto-fetched after first analysis; displayed on Plant Detail screen as collapsible reference card; species profile passed as context into analyze-plant for species-aware health assessments; Refresh button allows regeneration on demand.
 - **2026-03-28** — Phase 10 design review: app diagnosed as "database with thin UI." Two core problems: (1) plant list has no photos — fundamental mismatch for a visual, nature-oriented app; (2) no at-a-glance care status — you can't tell what needs attention without opening each plant. Four-phase UX overhaul planned: 10A visual grid, 10B detail restructure, 10C richer data, 10D today view.
 - **2026-03-28** — Phase 10A complete: My Plants screen rebuilt as 2-column photo grid. Cover photo fetched as most recent photo per plant (3 total DB queries regardless of collection size). Watering status computed from care_logs and plants.watering_interval_days; displayed as colored badge (red=overdue, amber=due soon, transparent=good). Attention banner shows count of plants needing water. Improved empty state with large icon and welcoming copy.
+- **2026-03-29** — Phase 10C complete: Five new care log types added (repotted, pruned, misted, pest_treatment, moved) behind a collapsible "More actions" row on the Overview tab. Four new plant fields added (location, pot_size, acquired_date, last_repotted_date) to the plants table, Edit form, Add Plant form, and Overview details section. Location and pot_size now passed as context to the analyze-plant Edge Function so AI recommendations are location-aware. Requires Supabase schema migration (see decisions log).
+- **2026-03-28** — Phase 10B complete: Plant Detail screen restructured from single long scroll into three-tab layout (Overview / History / Species). Fixed header with plant name always visible. Quick-action bar (Watered / Fertilized / Note / Add Photo) is the first interactive element on Overview — no scrolling required for common actions. History tab merges care logs and AI analyses into a unified chronological timeline with a dot-and-line visual. Species tab shows the full species profile without collapsing. Edit mode hides the tab bar and takes over the content area.
 - **2026-03-28** — Phase 9 complete: Viriditas deployed live on Vercel. Fixed two build-blocking issues: (1) missing @expo/metro-runtime, (2) `window is not defined` SSR crash caused by AsyncStorage being initialized in Node.js during Expo's static render pass — fixed by using `localStorage` on web. Post-deploy web UI fixes: JSX `//` comment rendered as visible text (fixed to `{/* */}`), internal scrollbar shown on plant detail (hidden with showsVerticalScrollIndicator={false}), content too narrow at 600px (increased to 800px).
+- **2026-03-29** — Phase 10D complete: My Plants screen gains "Today View" layer. Plants sorted by urgency (overdue → due-soon → good → unset). Attention banner split into separate overdue (red) and due-soon (amber) banners that stack when both conditions exist. Green "All caught up!" banner shown when all plants with reminders are in good status. Care streak chip added next to the "My Plants" title — computes consecutive calendar days with any logged care event (any plant, any action type) from a single query over the past year.

@@ -1,0 +1,135 @@
+// lib/utils.ts
+// Shared utility functions used across the app.
+// Pure functions — no Supabase or Next.js imports.
+
+import type { CareLog } from '@/lib/types'
+
+// ── Date helpers ────────────────────────────────────────────────────────────
+
+// Converts a Date (or ISO timestamp string) → "YYYY-MM-DD" in LOCAL time.
+// We use getFullYear/getMonth/getDate (local-time methods), NOT toISOString(),
+// to avoid midnight UTC shifting to the previous local day.
+export function toLocalDateStr(dateOrIso: Date | string): string {
+  const d = typeof dateOrIso === 'string' ? new Date(dateOrIso) : dateOrIso
+  const yyyy = d.getFullYear()
+  const mm   = String(d.getMonth() + 1).padStart(2, '0')
+  const dd   = String(d.getDate()).padStart(2, '0')
+  return `${yyyy}-${mm}-${dd}`
+}
+
+// Formats a YYYY-MM-DD string for human-readable display, e.g. "March 15, 2024".
+// Appends T12:00:00 to prevent midnight UTC from shifting to the previous local day.
+export function formatDate(ymd: string | null | undefined): string {
+  if (!ymd) return ''
+  return new Date(`${ymd}T12:00:00`).toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  })
+}
+
+// Formats an ISO timestamp string for display in timelines.
+export function formatTimestamp(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+}
+
+// ── Watering status ──────────────────────────────────────────────────────────
+
+export type WateringStatus = 'overdue' | 'due-soon' | 'good' | 'unset'
+
+// Computes a plant's watering status from its interval and most recent watered log.
+// - overdue:  days since last watering > interval
+// - due-soon: within 1 day of interval (0–1 days left)
+// - good:     more than 1 day remaining
+// - unset:    no interval configured
+export function computeWateringStatus(
+  wateringIntervalDays: number | null,
+  lastWateredLog: CareLog | null | undefined
+): WateringStatus {
+  if (!wateringIntervalDays) return 'unset'
+  if (!lastWateredLog) return 'overdue'
+
+  const lastWatered = new Date(lastWateredLog.logged_at)
+  const now = new Date()
+  const daysSince = (now.getTime() - lastWatered.getTime()) / (1000 * 60 * 60 * 24)
+  const daysLeft = wateringIntervalDays - daysSince
+
+  if (daysLeft < 0) return 'overdue'
+  if (daysLeft <= 1) return 'due-soon'
+  return 'good'
+}
+
+// ── Care streak ─────────────────────────────────────────────────────────────
+
+// Computes the number of consecutive local calendar days (ending today or yesterday)
+// on which any care log was recorded across the user's entire plant collection.
+//
+// Logic:
+//   - Start from today. If today has a log, count it and work backwards.
+//   - If today has no log, check yesterday. If yesterday has a log, streak is still
+//     "alive" — start counting backwards from yesterday.
+//   - Return the count of consecutive days found.
+export function computeStreak(logTimestamps: string[]): number {
+  if (logTimestamps.length === 0) return 0
+
+  const dateSet = new Set(logTimestamps.map(toLocalDateStr))
+
+  function subtractDay(dateStr: string, n = 1): string {
+    const d = new Date(`${dateStr}T12:00:00`)
+    d.setDate(d.getDate() - n)
+    return toLocalDateStr(d)
+  }
+
+  const todayStr = toLocalDateStr(new Date())
+  let checkDate = todayStr
+
+  // If today has no log, try yesterday before giving up
+  if (!dateSet.has(checkDate)) {
+    checkDate = subtractDay(checkDate)
+    if (!dateSet.has(checkDate)) return 0
+  }
+
+  // Count backwards through consecutive days
+  let streak = 0
+  while (dateSet.has(checkDate)) {
+    streak++
+    checkDate = subtractDay(checkDate)
+  }
+  return streak
+}
+
+// ── Care log labels ──────────────────────────────────────────────────────────
+
+export const CARE_LOG_LABELS: Record<string, string> = {
+  watered:       'Watered',
+  fertilized:    'Fertilized',
+  note:          'Note',
+  repotted:      'Repotted',
+  pruned:        'Pruned',
+  misted:        'Misted',
+  pest_treatment:'Pest Treatment',
+  moved:         'Moved',
+}
+
+export const CARE_LOG_ICONS: Record<string, string> = {
+  watered:       '💧',
+  fertilized:    '🌱',
+  note:          '📝',
+  repotted:      '🪴',
+  pruned:        '✂️',
+  misted:        '🌫️',
+  pest_treatment:'🐛',
+  moved:         '📍',
+}
+
+// Sort order for urgency — lower number = higher urgency
+export const URGENCY_ORDER: Record<WateringStatus, number> = {
+  overdue:   0,
+  'due-soon': 1,
+  good:      2,
+  unset:     3,
+}

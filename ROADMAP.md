@@ -1,9 +1,260 @@
 # Viriditas — Development Roadmap
 
 ## Overview
-Building a cross-platform houseplant care app using Expo (React Native) + Supabase + Anthropic Claude API.
+Viriditas is a houseplant care web app — runs in any browser, installable as a PWA on Android
+and iOS. Backend: Supabase (PostgreSQL, Auth, Storage, Edge Functions). AI: Anthropic Claude API.
+Frontend: **Next.js 15** (migrated from Expo/React Native in March 2026).
 
 **Status key:** ✅ Done · 🔄 In Progress · ⬜ Not Started
+
+---
+
+## Phase M — Next.js Migration 🔄
+**Decision (2026-03-30):** Pivot from Expo (React Native) to Next.js 15 (pure web app).
+The app was already deployed as a web app on Vercel. Removing the React Native layer
+eliminates dual code paths, native build complexity, and platform-specific workarounds.
+Users access the app via browser on any device and can install it as a PWA.
+
+The Supabase database schema, RLS policies, Storage setup, and Edge Functions are **identical**
+and required zero changes. All prior feature work (plant registry, AI analysis, care logs,
+species profiles, etc.) is preserved in the new stack.
+
+**What changes:** The frontend only. React Native components → HTML + Tailwind. Expo Router →
+Next.js App Router. AsyncStorage → Supabase SSR cookie-based auth. `EXPO_PUBLIC_` env vars →
+`NEXT_PUBLIC_`.
+
+---
+
+### Phase M1 — Bootstrap ✅
+Initialize the Next.js project and verify the Supabase connection end-to-end.
+
+| Task | Status |
+|---|---|
+| Archive Expo source in `_expo-archive/` | ✅ |
+| Initialize Next.js 15 with TypeScript, Tailwind CSS, App Router | ✅ |
+| Install `@supabase/ssr` and configure browser + server clients | ✅ |
+| Configure Tailwind with brand color (#2d6a4f) | ✅ |
+| `middleware.ts` — protect all `/(app)` routes, redirect to sign-in | ✅ |
+| Deploy empty shell to Vercel, confirm build passes | ✅ |
+| Add `NEXT_PUBLIC_` env vars in Vercel dashboard | ✅ |
+
+---
+
+### Phase M2 — Auth ✅
+Sign-in and sign-up pages, protected route layout.
+
+| Task | Status |
+|---|---|
+| `app/(auth)/sign-in/page.tsx` — email/password sign in | ✅ |
+| `app/(auth)/sign-up/page.tsx` — email/password sign up | ✅ |
+| `app/(auth)/layout.tsx` — centered card layout for auth pages | ✅ |
+| `app/(app)/layout.tsx` — protected shell with bottom nav | ✅ |
+| Auth state reflected correctly across navigation | ✅ |
+
+---
+
+### Phase M3 — My Plants ✅
+The main grid screen with urgency sorting, banners, and care streak.
+
+| Task | Status |
+|---|---|
+| Fetch plants with cover photos and latest care log (3 queries) | ✅ |
+| 2-column photo grid (Tailwind CSS grid) | ✅ |
+| Watering status badges (overdue / due-soon / good) | ✅ |
+| Urgency sort (overdue → due-soon → good → unset) | ✅ |
+| Attention banners (overdue red, due-soon amber, all-clear green) | ✅ |
+| Care streak chip (🌿 Today / 🔥 N-day streak) | ✅ |
+| Empty state with welcoming copy | ✅ |
+
+---
+
+### Phase M4 — Add Plant ✅
+Form for registering a new plant.
+
+| Task | Status |
+|---|---|
+| Nickname, species, location, notes text inputs | ✅ |
+| Native date picker for acquisition date (`<input type="date">`) | ✅ |
+| Supabase insert + redirect to new plant detail | ✅ |
+
+---
+
+### Phase M5 — Plant Detail ✅
+Three-tab layout: Overview, History, Species.
+
+| Task | Status |
+|---|---|
+| Tab navigation (Overview / History / Species) | ✅ |
+| Overview: hero photo carousel, quick-action care buttons, latest analysis card, watering reminder section, plant metadata | ✅ |
+| History: unified timeline of care logs + analyses, newest first | ✅ |
+| Species: full species profile from `species_profiles` table | ✅ |
+| Edit plant form (all fields, native date pickers) | ✅ |
+| Delete plant (with confirmation) | ✅ |
+
+---
+
+### Phase M6 — Photo Upload ✅
+Camera and file-picker based photo upload to Supabase Storage.
+
+| Task | Status |
+|---|---|
+| `<input type="file" accept="image/*" capture="environment">` | ✅ |
+| Upload to Supabase Storage + insert into `photos` table | ✅ |
+| Photo gallery in hero carousel on Overview tab | ✅ |
+
+---
+
+### Phase M7 — AI Analysis ✅
+Trigger analysis from Plant Detail, show results, auto-fetch species profile.
+
+| Task | Status |
+|---|---|
+| "Analyze Plant" button calls `analyze-plant` Edge Function | ✅ |
+| Analysis results saved and displayed | ✅ |
+| Species profile auto-fetched after first AI identification | ✅ |
+| "Refresh species info" button | ✅ |
+
+---
+
+### Phase M8 — Settings ✅
+Account management screen.
+
+| Task | Status |
+|---|---|
+| `app/(app)/settings/page.tsx` — email display, sign out, about | ✅ |
+| Sign out: POST to Route Handler → supabase.auth.signOut() → redirect | ✅ |
+
+---
+
+### Phase M9 — PWA ⬜
+Make the app installable as a home screen icon on Android and iOS.
+
+| Task | Status |
+|---|---|
+| `public/manifest.json` — name, icons, theme color, display: standalone | ⬜ |
+| App icons at required sizes (192×192, 512×512) | ⬜ |
+| `<link rel="manifest">` in root layout | ⬜ |
+| Verify "Add to Home Screen" prompt on Android Chrome | ⬜ |
+| Verify "Add to Home Screen" works on iOS Safari (iOS 16.4+) | ⬜ |
+
+---
+
+## Phase 11 — Critical UX Fixes 🔄
+These carry forward from the Expo era. They are needed before the app is
+ready to share with real users. Phases 11A–11C were completed in the Expo era
+and need to be re-implemented in the Next.js rewrite where applicable.
+
+---
+
+### Phase 11D — Care Action Feedback ⬜
+Tapping a care action (Watered, Fertilized, etc.) logs silently with no visual
+confirmation. In a habit-forming app, the feedback is the reward.
+
+| Task | Status |
+|---|---|
+| Toast/snackbar notification after logging any care action | ⬜ |
+| Update watering badge immediately after logging "watered" (optimistic update) | ⬜ |
+
+---
+
+### Phase 11E — First-Time User Experience ⬜
+A new user sees an empty grid with no context about what Viriditas does.
+
+| Task | Status |
+|---|---|
+| Richer empty state: explain what Viriditas does and what to expect | ⬜ |
+| After "Add Plant" succeeds, navigate directly to that plant's detail | ⬜ |
+| On first visit to a plant with no photos, show prominent "Add a photo to unlock AI analysis" | ⬜ |
+
+---
+
+## Phase 12 — Depth & Botanical Intelligence ⬜
+These features make the app meaningfully better for anyone who takes plant care seriously.
+
+---
+
+### Phase 12A — Health Score & Trend Tracking ⬜
+| Task | Status |
+|---|---|
+| Add `health_score` (integer 1–5) to `analysis_results` table | ⬜ |
+| Update `analyze-plant` prompt to return a numeric health score | ⬜ |
+| Display score badge on each analysis card in History tab | ⬜ |
+| Health trend sparkline on Overview (requires 3+ analyses) | ⬜ |
+
+---
+
+### Phase 12B — Fertilizing Reminder ⬜
+| Task | Status |
+|---|---|
+| Add `fertilizing_interval_days` column to `plants` table | ⬜ |
+| Fertilizing reminder UI on Plant Detail (interval selector) | ⬜ |
+| Show fertilizing status badge on plant cards | ⬜ |
+| Include fertilizing urgency in the My Plants urgency sort | ⬜ |
+
+---
+
+### Phase 12C — Soil Type Field ⬜
+| Task | Status |
+|---|---|
+| Add `soil_type` column to `plants` table | ⬜ |
+| Soil type field in Add Plant + Edit form | ⬜ |
+| Pass `soil_type` to `analyze-plant` Edge Function as plantContext | ⬜ |
+
+---
+
+### Phase 12D — Photo Management ⬜
+| Task | Status |
+|---|---|
+| Delete photo option (confirm before delete) | ⬜ |
+| Side-by-side photo comparison (select any two from history) | ⬜ |
+
+---
+
+### Phase 12E — Seasonal Awareness ⬜
+| Task | Status |
+|---|---|
+| Pass current month/hemisphere to `analyze-plant` for seasonal advice | ⬜ |
+| Winter mode banner (Nov–Feb, northern hemisphere) suggesting interval review | ⬜ |
+| Seasonal care notes added to `fetch-species-info` prompt | ⬜ |
+
+---
+
+## Phase 13 — Power User & Scale Features ⬜
+These matter once users have 10+ plants and have been using the app daily for weeks.
+
+| Feature | Notes |
+|---|---|
+| Search and filter on My Plants screen | Filter by room, species, watering status |
+| Plant tagging / grouping | Group by room, light level, or custom tag |
+| Multi-plant care summary | "All upcoming care" view across the whole collection |
+| Photo export | Download all photos for a plant as a zip |
+| Plant diary | Free-text journal entries distinct from care logs |
+| Pest/treatment detail fields | Which pest, what product, how many applications |
+| Web Push Notifications | Watering reminders via Web Push API (Android Chrome first; iOS requires home screen install) |
+
+---
+
+## Notes & Decisions Log
+- **2026-03-26** — Tech stack chosen: Expo + Supabase + Anthropic Claude API
+- **2026-03-26** — Developer is on Mac, testing on Android
+- **2026-03-26** — Foundation complete, Supabase connection verified
+- **2026-03-26** — Auth complete: sign up, sign in, sign out, auth-gated navigation all working
+- **2026-03-26** — Plant registry complete: plants table, My Plants list, Add Plant, Plant Detail with edit/delete
+- **2026-03-26** — Auth gate fix: switched from useSegments() to pure session-based routing for Expo Router 6 compatibility
+- **2026-03-26** — Photos complete: camera + library picker, Supabase Storage upload, photo gallery on Plant Detail screen
+- **2026-03-26** — Upload fix: blob.arrayBuffer() not supported in React Native; use base64: true in ImagePicker options instead
+- **2026-03-27** — Phase 5 complete: AI analysis working end-to-end using Claude API (claude-haiku-4-5-20251001). Switched from Gemini (quota issues) to Claude. Edge Function deployed with --no-verify-jwt flag; JWT is passed explicitly from the app via session.access_token.
+- **2026-03-27** — Phase 7 complete: per-plant watering reminders with 5 preset intervals; stored in plants.watering_interval_days; notification ID stored in AsyncStorage. NOTE: AsyncStorage/push notifications are Expo-only and not carried forward to the Next.js rewrite. Interval display and in-app badge are fully preserved.
+- **2026-03-27** — Phase 8 complete: species_profiles table created; fetch-species-info Edge Function deployed; species profile auto-fetched after first analysis; displayed on Plant Detail; passed as context into analyze-plant for species-aware health assessments.
+- **2026-03-28** — Phase 10 complete: Visual photo grid, Plant Detail tab restructure (Overview/History/Species), richer care log types and plant fields, Today View with urgency sorting and care streak.
+- **2026-03-29** — Phase 11A–11C complete: Notification sync (Expo-only, not in Next.js rewrite), Settings screen, date pickers.
+- **2026-03-30** — **ARCHITECTURE PIVOT: Expo → Next.js.** Decision to drop React Native and go pure web. Rationale: app was already deployed as a web app on Vercel; removing the RN layer eliminates dual code paths, platform-specific workarounds, and EAS build complexity. Expo source archived in `_expo-archive/`. Database, Edge Functions, and Supabase config are completely unchanged.
+
+---
+
+## Archived: Expo Era (Phases 1–11C)
+All phases below were completed using Expo (React Native). They are archived for historical
+reference. Their features are re-implemented in the Next.js migration (Phase M).
 
 ---
 

@@ -326,16 +326,21 @@ the app a proper home for account and app preferences.
 
 ---
 
-### Phase 11C — Date Pickers ⬜
+### Phase 11C — Date Pickers ✅
 Acquisition date and last repotted date currently use raw text inputs that require
 "YYYY-MM-DD" format. This fails silently for most users and shows a jarring Alert on
 format errors. These should be native date pickers on both platforms.
 
 | Task | Status |
 |---|---|
-| Replace acquisition date text input with a date picker (Add Plant screen) | ⬜ |
-| Replace acquisition date and last repotted date text inputs in Plant Detail edit form | ⬜ |
-| Display stored dates in human-readable format (e.g. "March 15, 2024") throughout the app | ⬜ |
+| Replace acquisition date text input with a date picker (Add Plant screen) | ✅ |
+| Replace acquisition date and last repotted date text inputs in Plant Detail edit form | ✅ |
+| Display stored dates in human-readable format (e.g. "March 15, 2024") throughout the app | ✅ |
+
+**Implementation note:** `DatePickerField.tsx` (native) uses `@react-native-community/datetimepicker` —
+Android opens the system dialog imperatively, iOS shows an inline spinner. `DatePickerField.web.tsx`
+overlays a transparent `<input type="date">` on a styled button, giving the browser's native calendar.
+Metro auto-selects the `.web.tsx` file for web builds. Values always flow as YYYY-MM-DD strings.
 
 ---
 

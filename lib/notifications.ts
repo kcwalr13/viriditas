@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unused-vars */
 // lib/notifications.ts
 // Stub — push notifications are not supported in the web version of Viriditas.
 // Watering intervals are stored in the database and displayed as status badges

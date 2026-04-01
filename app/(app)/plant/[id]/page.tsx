@@ -98,11 +98,11 @@ export default function PlantDetailPage() {
 
   // ── Initial data load ──────────────────────────────────────────────────────
 
-  useEffect(() => {
-    loadAll()
-  }, [id])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { loadAll() }, [id])
 
-  // When species becomes known, look up the species profile
+  // When species becomes known, look up the species profile.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     const species = plant?.species || latestAnalysis?.species
     if (species) fetchSpeciesProfileFromDB(species)

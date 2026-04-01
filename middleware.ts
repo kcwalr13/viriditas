@@ -4,6 +4,7 @@
 //   2. Redirect unauthenticated users away from protected pages, and redirect
 //      authenticated users away from the auth pages.
 import { createServerClient } from '@supabase/ssr'
+import type { CookieMethodsServer } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function middleware(request: NextRequest) {
@@ -18,7 +19,7 @@ export async function middleware(request: NextRequest) {
         getAll() {
           return request.cookies.getAll()
         },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: Parameters<NonNullable<CookieMethodsServer['setAll']>>[0]) {
           // Mirror the cookies onto both the request (for later middleware) and
           // the response (so the browser receives them).
           cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))

@@ -98,15 +98,17 @@ export default function PlantDetailPage() {
 
   // ── Initial data load ──────────────────────────────────────────────────────
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { loadAll() }, [id])
+  // Re-fetch everything when the plant ID changes (e.g. navigating between plants).
+  // loadAll is defined below and is stable within a render — safe to omit from deps.
+  useEffect(() => { loadAll() }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // When species becomes known, look up the species profile.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // When species becomes known (either from the plant record or from an analysis),
+  // look up the cached species profile from the database.
+  // fetchSpeciesProfileFromDB is defined below — safe to omit from deps.
   useEffect(() => {
     const species = plant?.species || latestAnalysis?.species
     if (species) fetchSpeciesProfileFromDB(species)
-  }, [plant?.species, latestAnalysis?.species])
+  }, [plant?.species, latestAnalysis?.species]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadAll() {
     setLoading(true)

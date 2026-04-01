@@ -18,5 +18,5 @@
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules", "_expo-archive"]
+  "exclude": ["node_modules", "_expo-archive", "supabase/functions"]
 }

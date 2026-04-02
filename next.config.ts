@@ -1,4 +1,5 @@
 import type { NextConfig } from 'next'
+import path from 'path'
 
 const nextConfig: NextConfig = {
   // Allow images from Supabase Storage to be displayed via next/image
@@ -20,22 +21,19 @@ const nextConfig: NextConfig = {
     // __dirname is not defined in Edge Runtime (where middleware runs), causing
     // MIDDLEWARE_INVOCATION_FAILED on every request.
     //
-    // Two complementary fixes:
-    // 1. DefinePlugin: replace the __dirname identifier with "" at compile time
-    //    using Next.js's own webpack instance (options.webpack, not require('webpack')).
-    // 2. node.__dirname: tell webpack to mock __dirname as '/' in the bundle,
-    //    which serves as a fallback if DefinePlugin doesn't cover a specific occurrence.
+    // Fix: for Edge Runtime builds, swap out the ncc-compiled ua-parser-js module
+    // entirely with a local patched copy (lib/ua-parser-edge-safe.js) that has
+    // the __dirname reference removed. This uses webpack resolve.alias, which
+    // operates at the module resolution level and is more reliable than
+    // DefinePlugin (which does text substitution but can miss ncc-compiled code
+    // that webpack treats as a single opaque chunk).
     if (options.nextRuntime === 'edge') {
-      config.plugins = config.plugins ?? []
-      config.plugins.push(
-        new options.webpack.DefinePlugin({
-          __dirname: JSON.stringify(''),
-        })
-      )
-      // Belt-and-suspenders: webpack's built-in node mock for __dirname
-      config.node = {
-        ...config.node,
-        __dirname: true,
+      config.resolve = config.resolve ?? {}
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        // Redirect any import of the ncc-compiled ua-parser-js to our patched version
+        [path.resolve('./node_modules/next/dist/compiled/ua-parser-js/ua-parser.js')]:
+          path.resolve('./lib/ua-parser-edge-safe.js'),
       }
     }
     return config

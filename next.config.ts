@@ -1,5 +1,4 @@
 import type { NextConfig } from 'next'
-import type { Configuration } from 'webpack'
 
 const nextConfig: NextConfig = {
   // Allow images from Supabase Storage to be displayed via next/image
@@ -13,7 +12,7 @@ const nextConfig: NextConfig = {
     ],
   },
 
-  webpack(config: Configuration, { nextRuntime }: { nextRuntime?: string }) {
+  webpack(config, { nextRuntime }: { nextRuntime?: string }) {
     // The compiled ua-parser-js bundled inside next/server uses __dirname at
     // module load time (the ncc wrapper line: __nccwpck_require__.ab = __dirname + "/").
     // __dirname does not exist in the Edge Runtime, causing MIDDLEWARE_INVOCATION_FAILED

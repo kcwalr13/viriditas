@@ -28,13 +28,18 @@ const nextConfig: NextConfig = {
     // DefinePlugin (which does text substitution but can miss ncc-compiled code
     // that webpack treats as a single opaque chunk).
     if (options.nextRuntime === 'edge') {
-      config.resolve = config.resolve ?? {}
-      config.resolve.alias = {
-        ...config.resolve.alias,
-        // Redirect any import of the ncc-compiled ua-parser-js to our patched version
-        [path.resolve('./node_modules/next/dist/compiled/ua-parser-js/ua-parser.js')]:
-          path.resolve('./lib/ua-parser-edge-safe.js'),
-      }
+      // NormalModuleReplacementPlugin intercepts AFTER webpack resolves the module
+      // to its absolute path on disk — unlike resolve.alias (which matches against
+      // the raw import string). This is necessary because Next.js imports ua-parser-js
+      // via a relative path from inside its own package, so we can only match by
+      // the resolved filesystem path.
+      config.plugins = config.plugins ?? []
+      config.plugins.push(
+        new options.webpack.NormalModuleReplacementPlugin(
+          /next[\\/]dist[\\/]compiled[\\/]ua-parser-js[\\/]ua-parser\.js/,
+          path.resolve('./lib/ua-parser-edge-safe.js')
+        )
+      )
     }
     return config
   },

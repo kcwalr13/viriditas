@@ -35,8 +35,12 @@ const nextConfig: NextConfig = {
       // the resolved filesystem path.
       config.plugins = config.plugins ?? []
       config.plugins.push(
+        // user-agent.js inside Next.js does:
+        //   require("next/dist/compiled/ua-parser-js")  ← no /ua-parser.js suffix
+        // NormalModuleReplacementPlugin matches against the REQUEST string
+        // (before resolution), so we must match the package path, not the file.
         new options.webpack.NormalModuleReplacementPlugin(
-          /next[\\/]dist[\\/]compiled[\\/]ua-parser-js[\\/]ua-parser\.js/,
+          /next\/dist\/compiled\/ua-parser-js/,
           path.resolve('./lib/ua-parser-edge-safe.js')
         )
       )

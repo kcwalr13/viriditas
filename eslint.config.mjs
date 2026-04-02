@@ -10,6 +10,10 @@ const compat = new FlatCompat({
 })
 
 const eslintConfig = [
+  // Ignore the patched ua-parser-js bundle — it's a third-party minified file
+  // that we only modified to remove a single __dirname reference. ESLint
+  // correctly flags unused vars in it but we can't and shouldn't rewrite it.
+  { ignores: ['lib/ua-parser-edge-safe.js'] },
   ...compat.extends('next/core-web-vitals', 'next/typescript'),
 ]
 

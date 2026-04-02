@@ -12,22 +12,31 @@ const nextConfig: NextConfig = {
     ],
   },
 
-  webpack(config, { nextRuntime }: { nextRuntime?: string }) {
-    // The compiled ua-parser-js bundled inside next/server uses __dirname at
-    // module load time (the ncc wrapper line: __nccwpck_require__.ab = __dirname + "/").
-    // __dirname does not exist in the Edge Runtime, causing MIDDLEWARE_INVOCATION_FAILED
-    // on every request. Defining it as an empty string satisfies the assignment
-    // without affecting any real path lookups (ua-parser-js doesn't use __dirname
-    // for anything meaningful — the ncc wrapper just sets it as a base path hint).
-    if (nextRuntime === 'edge') {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  webpack(config, options: any) {
+    // The ncc-compiled ua-parser-js bundled inside next/server contains this line
+    // at module load time:
+    //   if(typeof __nccwpck_require__!=="undefined")__nccwpck_require__.ab=__dirname+"/";
+    // __dirname is not defined in Edge Runtime (where middleware runs), causing
+    // MIDDLEWARE_INVOCATION_FAILED on every request.
+    //
+    // Two complementary fixes:
+    // 1. DefinePlugin: replace the __dirname identifier with "" at compile time
+    //    using Next.js's own webpack instance (options.webpack, not require('webpack')).
+    // 2. node.__dirname: tell webpack to mock __dirname as '/' in the bundle,
+    //    which serves as a fallback if DefinePlugin doesn't cover a specific occurrence.
+    if (options.nextRuntime === 'edge') {
       config.plugins = config.plugins ?? []
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const webpack = require('webpack')
       config.plugins.push(
-        new webpack.DefinePlugin({
+        new options.webpack.DefinePlugin({
           __dirname: JSON.stringify(''),
         })
       )
+      // Belt-and-suspenders: webpack's built-in node mock for __dirname
+      config.node = {
+        ...config.node,
+        __dirname: true,
+      }
     }
     return config
   },

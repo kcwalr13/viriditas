@@ -27,7 +27,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       {/* Bottom navigation bar */}
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 safe-bottom z-50">
         <div className="max-w-2xl mx-auto flex">
-          <NavItem href="/" label="My Plants" icon="🌿" />
+          <NavItem href="/"        label="My Plants" icon="🌿" />
+          <NavItem href="/explore" label="Explore"   icon="🔍" />
           <NavItem href="/settings" label="Settings" icon="⚙️" />
         </div>
       </nav>

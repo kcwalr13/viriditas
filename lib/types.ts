@@ -64,6 +64,8 @@ export type SpeciesProfile = {
   common_problems: string | null
   growth_habits: string | null
   propagation: string | null
+  pruning_tips: string | null     // how and when to prune; shape/health benefits
+  disease_symptoms: string | null // visual signs of disease, pests, nutrient deficiency
   fetched_at: string
   updated_at: string
 }

@@ -51,7 +51,9 @@ Respond with a JSON object in exactly this format — no extra text, no markdown
   "toxicity": "Whether toxic to cats, dogs, or humans — be specific about symptoms if toxic",
   "common_problems": "The most common issues (yellowing leaves, root rot, pests, etc), what causes them, and how to treat them",
   "growth_habits": "Typical size at maturity, growth rate, growth pattern (bushy, trailing, upright, etc), any notable characteristics",
-  "propagation": "The easiest and most reliable method(s) to propagate this plant, with brief steps"
+  "propagation": "The easiest and most reliable method(s) to propagate this plant, with brief steps",
+  "pruning_tips": "When to prune (season, growth stage), which parts to remove, how to encourage bushiness or control size, how to make clean cuts to avoid disease",
+  "disease_symptoms": "Visual signs of common diseases, pest infestations, and nutrient deficiencies — describe what each looks like on leaves, stems, and roots, and how to distinguish them from each other"
 }
 
 If the species name is unrecognized or too vague to give reliable care information, still return the JSON but note the uncertainty in the relevant fields.`

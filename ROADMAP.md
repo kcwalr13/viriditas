@@ -126,7 +126,7 @@ Account management screen.
 
 ---
 
-### Phase M9 — PWA 🔄
+### Phase M9 — PWA ✅
 Make the app installable as a home screen icon on Android and iOS.
 
 | Task | Status |
@@ -134,12 +134,12 @@ Make the app installable as a home screen icon on Android and iOS.
 | `public/manifest.json` — name, icons, theme color, display: standalone | ✅ |
 | App icons: `public/icon.png` (1024×1024), `public/icon-192.png` (192×192) | ✅ |
 | `manifest` linked in root layout via Next.js metadata API | ✅ |
-| Verify "Add to Home Screen" prompt on Android Chrome | ⬜ |
-| Verify "Add to Home Screen" works on iOS Safari (iOS 16.4+) | ⬜ |
+| Verify "Add to Home Screen" prompt on Android Chrome | ✅ |
+| Verify "Add to Home Screen" works on iOS Safari (iOS 16.4+) | ✅ |
 
 ---
 
-## Phase 11 — Critical UX Fixes 🔄
+## Phase 11 — Critical UX Fixes ✅
 These carry forward from the Expo era. They are needed before the app is
 ready to share with real users. Phases 11A–11C were completed in the Expo era
 and need to be re-implemented in the Next.js rewrite where applicable.
@@ -253,6 +253,8 @@ These matter once users have 10+ plants and have been using the app daily for we
 - **2026-04-02** — Full end-to-end test pass completed on live app. All core flows verified: auth (sign up/in/out), My Plants grid, Add Plant (→ redirects to detail ✅), Plant Detail (Overview/History/Species tabs), care logging (all types), note logging, AI analysis display, Edit plant (all fields + date picker, router.refresh() working), Delete plant, Settings screen. One known UX gap confirmed: care action buttons give no visual feedback after tap (Phase 11D).
 - **2026-04-03** — Phase 11D complete: care action toast feedback. Dark pill toast slides up above nav bar after every care log; auto-dismisses after 2.5s; re-triggers animation on rapid successive taps. "Watered" also calls router.refresh() to sync My Plants watering badge in the background.
 - **2026-04-03** — Phase 11E complete: first-time UX improvements. Empty state now shows feature-highlight cards (AI analysis, care tracking, species guides). Plant detail no-photo placeholder is now a tappable CTA that opens the file picker and explains that photos unlock AI analysis.
+- **2026-04-03** — Phase M9 complete: PWA verified on Android Chrome and iOS Safari. App installs to home screen and runs in standalone mode on both platforms.
+- **2026-04-03** — All critical phases complete (M1–M9, 11D, 11E). App is ready to share with real users. Next: Phase 12 depth features.
 
 ---
 

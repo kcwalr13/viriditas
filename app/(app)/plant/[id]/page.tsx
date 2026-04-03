@@ -699,10 +699,17 @@ export default function PlantDetailPage() {
                 className="w-full h-full object-cover"
               />
             ) : (
-              <div className="w-full h-full flex flex-col items-center justify-center text-gray-400">
-                <span className="text-5xl mb-2">🌿</span>
-                <span className="text-sm">No photos yet</span>
-              </div>
+              /* No-photo CTA: tappable, explains that photos unlock AI analysis */
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full h-full flex flex-col items-center justify-center gap-2 bg-brand-bg hover:bg-green-100 transition-colors"
+              >
+                <span className="text-5xl">📸</span>
+                <p className="text-sm font-semibold text-brand">Add a photo</p>
+                <p className="text-xs text-gray-500 px-8 text-center leading-snug">
+                  Photos unlock AI species ID and health analysis
+                </p>
+              </button>
             )}
           </div>
 

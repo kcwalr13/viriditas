@@ -50,12 +50,38 @@ export default function MyPlantsClient({ cards, streak }: Props) {
 
       {/* ── Empty state ──────────────────────────────────────────────── */}
       {cards.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
+        <div className="flex flex-col items-center justify-center py-12 text-center">
           <div className="text-6xl mb-4">🌱</div>
-          <h2 className="text-xl font-semibold text-gray-800 mb-2">No plants yet</h2>
-          <p className="text-sm text-gray-500 max-w-xs mb-6">
-            Add your first plant and get AI-powered care guidance, species identification, and health tracking.
+          <h2 className="text-xl font-semibold text-gray-800 mb-2">Welcome to Viriditas</h2>
+          <p className="text-sm text-gray-500 max-w-xs mb-8">
+            Your personal plant companion. Add a plant to get started.
           </p>
+
+          {/* Feature highlights — show the three main value props */}
+          <div className="w-full max-w-xs space-y-3 mb-8 text-left">
+            <div className="flex items-start gap-3 bg-brand-bg rounded-xl px-4 py-3">
+              <span className="text-xl mt-0.5">📸</span>
+              <div>
+                <p className="text-sm font-semibold text-gray-800">AI plant analysis</p>
+                <p className="text-xs text-gray-500">Snap a photo for species ID and health tips</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3 bg-brand-bg rounded-xl px-4 py-3">
+              <span className="text-xl mt-0.5">💧</span>
+              <div>
+                <p className="text-sm font-semibold text-gray-800">Care tracking</p>
+                <p className="text-xs text-gray-500">Log watering, fertilizing, and more — see your history</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3 bg-brand-bg rounded-xl px-4 py-3">
+              <span className="text-xl mt-0.5">📖</span>
+              <div>
+                <p className="text-sm font-semibold text-gray-800">Species guides</p>
+                <p className="text-xs text-gray-500">Detailed care profiles for any houseplant</p>
+              </div>
+            </div>
+          </div>
+
           <Link
             href="/add-plant"
             className="bg-brand text-white font-semibold px-6 py-3 rounded-xl hover:bg-brand-light transition-colors"

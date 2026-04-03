@@ -146,14 +146,14 @@ and need to be re-implemented in the Next.js rewrite where applicable.
 
 ---
 
-### Phase 11D — Care Action Feedback ⬜
+### Phase 11D — Care Action Feedback ✅
 Tapping a care action (Watered, Fertilized, etc.) logs silently with no visual
 confirmation. In a habit-forming app, the feedback is the reward.
 
 | Task | Status |
 |---|---|
-| Toast/snackbar notification after logging any care action | ⬜ |
-| Update watering badge immediately after logging "watered" (optimistic update) | ⬜ |
+| Toast/snackbar notification after logging any care action | ✅ |
+| Update watering badge immediately after logging "watered" (optimistic update) | ✅ |
 
 ---
 
@@ -251,6 +251,7 @@ These matter once users have 10+ plants and have been using the app daily for we
 - **2026-03-30** — **ARCHITECTURE PIVOT: Expo → Next.js.** Decision to drop React Native and go pure web. Rationale: app was already deployed as a web app on Vercel; removing the RN layer eliminates dual code paths, platform-specific workarounds, and EAS build complexity. Expo source archived in `_expo-archive/`. Database, Edge Functions, and Supabase config are completely unchanged.
 - **2026-04-02** — Next.js migration fully verified on Vercel. Root cause of deployment 500 errors: `ua-parser-js` ncc bundle contains `__dirname` reference which crashes Edge Runtime (where middleware runs). Fixed with a prebuild patch script (`scripts/patch-ua-parser.js`) that rewrites the file before webpack sees it. Root cause of 404 errors: Vercel project settings had never been updated from the Expo era — Framework Preset was "Other" and Output Directory was overridden to "dist". Corrected to Framework Preset: Next.js, Output: default. App is live and functional.
 - **2026-04-02** — Full end-to-end test pass completed on live app. All core flows verified: auth (sign up/in/out), My Plants grid, Add Plant (→ redirects to detail ✅), Plant Detail (Overview/History/Species tabs), care logging (all types), note logging, AI analysis display, Edit plant (all fields + date picker, router.refresh() working), Delete plant, Settings screen. One known UX gap confirmed: care action buttons give no visual feedback after tap (Phase 11D).
+- **2026-04-03** — Phase 11D complete: care action toast feedback. Dark pill toast slides up above nav bar after every care log; auto-dismisses after 2.5s; re-triggers animation on rapid successive taps. "Watered" also calls router.refresh() to sync My Plants watering badge in the background.
 
 ---
 

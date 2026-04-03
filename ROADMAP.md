@@ -163,7 +163,7 @@ A new user sees an empty grid with no context about what Viriditas does.
 | Task | Status |
 |---|---|
 | Richer empty state: explain what Viriditas does and what to expect | ⬜ |
-| After "Add Plant" succeeds, navigate directly to that plant's detail | ⬜ |
+| After "Add Plant" succeeds, navigate directly to that plant's detail | ✅ |
 | On first visit to a plant with no photos, show prominent "Add a photo to unlock AI analysis" | ⬜ |
 
 ---
@@ -250,6 +250,7 @@ These matter once users have 10+ plants and have been using the app daily for we
 - **2026-03-29** — Phase 11A–11C complete: Notification sync (Expo-only, not in Next.js rewrite), Settings screen, date pickers.
 - **2026-03-30** — **ARCHITECTURE PIVOT: Expo → Next.js.** Decision to drop React Native and go pure web. Rationale: app was already deployed as a web app on Vercel; removing the RN layer eliminates dual code paths, platform-specific workarounds, and EAS build complexity. Expo source archived in `_expo-archive/`. Database, Edge Functions, and Supabase config are completely unchanged.
 - **2026-04-02** — Next.js migration fully verified on Vercel. Root cause of deployment 500 errors: `ua-parser-js` ncc bundle contains `__dirname` reference which crashes Edge Runtime (where middleware runs). Fixed with a prebuild patch script (`scripts/patch-ua-parser.js`) that rewrites the file before webpack sees it. Root cause of 404 errors: Vercel project settings had never been updated from the Expo era — Framework Preset was "Other" and Output Directory was overridden to "dist". Corrected to Framework Preset: Next.js, Output: default. App is live and functional.
+- **2026-04-02** — Full end-to-end test pass completed on live app. All core flows verified: auth (sign up/in/out), My Plants grid, Add Plant (→ redirects to detail ✅), Plant Detail (Overview/History/Species tabs), care logging (all types), note logging, AI analysis display, Edit plant (all fields + date picker, router.refresh() working), Delete plant, Settings screen. One known UX gap confirmed: care action buttons give no visual feedback after tap (Phase 11D).
 
 ---
 

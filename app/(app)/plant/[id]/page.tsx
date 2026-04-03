@@ -14,7 +14,7 @@ import {
 import type { Plant, PlantPhoto, CareLog, AnalysisResult, SpeciesProfile } from '@/lib/types'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -92,6 +92,18 @@ export default function PlantDetailPage() {
   const [acquiredDate,      setAcquiredDate]      = useState('')
   const [lastRepottedDate,  setLastRepottedDate]  = useState('')
   const [notes,             setNotes]             = useState('')
+
+  // ── Toast state ────────────────────────────────────────────────────────────
+  // A lightweight self-dismissing notification shown after care actions.
+  const [toast,         setToast]        = useState<{ message: string; key: number } | null>(null)
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Shows a toast for 2.5 seconds, replacing any existing one.
+  const showToast = useCallback((message: string) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
+    setToast({ message, key: Date.now() })
+    toastTimerRef.current = setTimeout(() => setToast(null), 2500)
+  }, [])
 
   // File input ref for photo upload
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -250,6 +262,15 @@ export default function PlantDetailPage() {
         notes: customNote ?? null,
       })
       if (error) throw error
+
+      // Show a brief confirmation toast using the action's icon + label
+      const label = type === 'note' ? 'Note saved' : CARE_LOG_LABELS[type]
+      showToast(`${CARE_LOG_ICONS[type]} ${label}`)
+
+      // For "watered", refresh the My Plants Server Component in the background
+      // so the watering badge is up-to-date when the user navigates back.
+      if (type === 'watered') router.refresh()
+
       await fetchCareLogs()
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Could not save care log.')
@@ -1085,6 +1106,20 @@ export default function PlantDetailPage() {
               </p>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Toast notification ──────────────────────────────────────────────────
+          Fixed above the bottom nav bar. Uses a CSS keyframe (toast-enter in
+          globals.css) to slide up and fade in. The `key` prop ensures the
+          animation re-triggers if the user taps another action while a toast
+          is already visible. `pointer-events-none` prevents it from blocking taps. */}
+      {toast && (
+        <div
+          key={toast.key}
+          className="toast-enter fixed bottom-20 left-1/2 z-50 bg-gray-800 text-white text-sm font-medium px-4 py-2 rounded-full shadow-lg pointer-events-none whitespace-nowrap"
+        >
+          {toast.message}
         </div>
       )}
     </div>

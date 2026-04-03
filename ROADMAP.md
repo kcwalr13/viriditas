@@ -9,7 +9,7 @@ Frontend: **Next.js 15** (migrated from Expo/React Native in March 2026).
 
 ---
 
-## Phase M — Next.js Migration 🔄
+## Phase M — Next.js Migration ✅
 **Decision (2026-03-30):** Pivot from Expo (React Native) to Next.js 15 (pure web app).
 The app was already deployed as a web app on Vercel. Removing the React Native layer
 eliminates dual code paths, native build complexity, and platform-specific workarounds.
@@ -122,18 +122,18 @@ Account management screen.
 | Task | Status |
 |---|---|
 | `app/(app)/settings/page.tsx` — email display, sign out, about | ✅ |
-| Sign out: POST to Route Handler → supabase.auth.signOut() → redirect | ✅ |
+| Sign out: `supabase.auth.signOut()` in Client Component → `router.push('/sign-in')` + `router.refresh()` | ✅ |
 
 ---
 
-### Phase M9 — PWA ⬜
+### Phase M9 — PWA 🔄
 Make the app installable as a home screen icon on Android and iOS.
 
 | Task | Status |
 |---|---|
-| `public/manifest.json` — name, icons, theme color, display: standalone | ⬜ |
-| App icons at required sizes (192×192, 512×512) | ⬜ |
-| `<link rel="manifest">` in root layout | ⬜ |
+| `public/manifest.json` — name, icons, theme color, display: standalone | ✅ |
+| App icons: `public/icon.png` (1024×1024), `public/icon-192.png` (192×192) | ✅ |
+| `manifest` linked in root layout via Next.js metadata API | ✅ |
 | Verify "Add to Home Screen" prompt on Android Chrome | ⬜ |
 | Verify "Add to Home Screen" works on iOS Safari (iOS 16.4+) | ⬜ |
 
@@ -249,6 +249,7 @@ These matter once users have 10+ plants and have been using the app daily for we
 - **2026-03-28** — Phase 10 complete: Visual photo grid, Plant Detail tab restructure (Overview/History/Species), richer care log types and plant fields, Today View with urgency sorting and care streak.
 - **2026-03-29** — Phase 11A–11C complete: Notification sync (Expo-only, not in Next.js rewrite), Settings screen, date pickers.
 - **2026-03-30** — **ARCHITECTURE PIVOT: Expo → Next.js.** Decision to drop React Native and go pure web. Rationale: app was already deployed as a web app on Vercel; removing the RN layer eliminates dual code paths, platform-specific workarounds, and EAS build complexity. Expo source archived in `_expo-archive/`. Database, Edge Functions, and Supabase config are completely unchanged.
+- **2026-04-02** — Next.js migration fully verified on Vercel. Root cause of deployment 500 errors: `ua-parser-js` ncc bundle contains `__dirname` reference which crashes Edge Runtime (where middleware runs). Fixed with a prebuild patch script (`scripts/patch-ua-parser.js`) that rewrites the file before webpack sees it. Root cause of 404 errors: Vercel project settings had never been updated from the Expo era — Framework Preset was "Other" and Output Directory was overridden to "dist". Corrected to Framework Preset: Next.js, Output: default. App is live and functional.
 
 ---
 

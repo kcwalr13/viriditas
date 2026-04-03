@@ -71,6 +71,10 @@ viriditas/
         index.ts            # Edge Function: AI plant analysis (provider-swappable)
       fetch-species-info/
         index.ts            # Edge Function: AI species profile fetch (provider-swappable)
+      identify-species/
+        index.ts            # Edge Function: identify species from base64 photo (no storage)
+      suggest-species/
+        index.ts            # Edge Function: returns 4-6 candidate species for a search query
   scripts/
     patch-ua-parser.js      # Prebuild script: patches __dirname out of ua-parser-js for Edge Runtime
   public/
@@ -101,6 +105,10 @@ viriditas/
 - [x] Supabase database schema, RLS policies, and Edge Functions (see schema section below)
 - [x] `scripts/patch-ua-parser.js` — prebuild patch so Next.js middleware works in Vercel Edge Runtime
 - [x] Vercel deployment — auto-deploys on push to main; framework preset: Next.js; output: default
+- [x] `app/(app)/explore/page.tsx` — Plant Encyclopedia: text search → disambiguation grid → profile; photo search → identify → profile; `FormattedContent` renderer for bullet/paragraph formatting
+- [x] `supabase/functions/identify-species/index.ts` — Edge Function: identifies species from base64 image; returns `{ speciesName, confidence }` (no DB writes, no storage)
+- [x] `supabase/functions/suggest-species/index.ts` — Edge Function: returns 4-6 candidate species for a freeform query (handles misspellings); browser fetches Wikipedia thumbnails after
+- [x] `species_profiles` table — `pruning_tips` and `disease_symptoms` columns added; `fetch-species-info` prompt updated to request bullet-formatted content
 
 ## What Comes Next
 See ROADMAP.md for the full feature breakdown and phase plan.
@@ -259,3 +267,13 @@ ALTER TABLE care_logs ADD CONSTRAINT care_logs_type_check CHECK (type IN (...all
 - This is because the screen is highly interactive (uploads, care logs, AI analysis, edit mode) and needs real-time state
 - The pattern: `useEffect(() => { loadAll() }, [id])` triggers a full refresh when the plant ID changes
 - A second `useEffect` watches `plant?.species || latestAnalysis?.species` and triggers species profile lookup when species becomes known
+
+### Explore / Encyclopedia Screen
+- `app/(app)/explore/page.tsx` — Client Component; all state managed locally
+- **Text search flow**: `suggest-species` Edge Function → Wikipedia thumbnail enrichment → 2-col suggestion grid → user selects → `fetch-species-info` → profile
+- **Photo search flow**: `identify-species` Edge Function (base64, no storage) → `fetch-species-info` → profile directly (no disambiguation step)
+- **Wikipedia thumbnails**: fetched client-side via `https://en.wikipedia.org/api/rest_v1/page/summary/{scientificName}` after getting suggestions; CORS-enabled, free, no API key; `thumbnail.source` from the response; failures silently ignored
+- **`suggest-species` Edge Function**: accepts `{ query }`, returns `{ suggestions: [{scientificName, commonName, description}] }`; handles misspellings, phonetic approximations, common names; deployed with `--no-verify-jwt`
+- **`FormattedContent` component**: renders species profile text with smart formatting — lines starting with `• ` or `- ` become bullet lists; double-newline separation becomes paragraphs; plain text falls back gracefully
+- **Bullet formatting in profiles**: `fetch-species-info` prompt requests `\n• ` bullet format for multi-item fields; existing cached entries won't have bullets until refreshed
+- **"Back to results" button**: shown on profile view when there are suggestions in state; clears profile and re-displays the grid without a new API call

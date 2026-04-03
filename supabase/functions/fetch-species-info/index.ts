@@ -43,18 +43,20 @@ Respond with a JSON object in exactly this format — no extra text, no markdown
 {
   "common_names": "Comma-separated list of common names (e.g. Rubber Plant, Rubber Fig)",
   "scientific_name": "The full scientific/Latin name (e.g. Ficus elastica)",
-  "light": "Detailed light requirements: preferred intensity, direct vs indirect, seasonal variation, signs of too much or too little light",
-  "watering": "How often to water, how to check soil moisture, signs of overwatering and underwatering, any seasonal adjustments",
-  "humidity": "Preferred humidity range, whether misting helps, any special humidity needs",
-  "temperature": "Ideal temperature range in both Fahrenheit and Celsius, cold/heat tolerance, whether to keep away from drafts or vents",
-  "soil": "Best soil mix, drainage requirements, when and how to repot, pot size guidance",
-  "toxicity": "Whether toxic to cats, dogs, or humans — be specific about symptoms if toxic",
-  "common_problems": "The most common issues (yellowing leaves, root rot, pests, etc), what causes them, and how to treat them",
-  "growth_habits": "Typical size at maturity, growth rate, growth pattern (bushy, trailing, upright, etc), any notable characteristics",
-  "propagation": "The easiest and most reliable method(s) to propagate this plant, with brief steps",
-  "pruning_tips": "When to prune (season, growth stage), which parts to remove, how to encourage bushiness or control size, how to make clean cuts to avoid disease",
-  "disease_symptoms": "Visual signs of common diseases, pest infestations, and nutrient deficiencies — describe what each looks like on leaves, stems, and roots, and how to distinguish them from each other"
+  "light": "Detailed light requirements. Use bullet format with '• ' for distinct points:\n• Preferred intensity and direction\n• Signs of too much or too little light\n• Any seasonal variation",
+  "watering": "Watering guidance in bullet format:\n• How often and how to judge when to water\n• Signs of overwatering and underwatering\n• Any seasonal adjustments",
+  "humidity": "Humidity needs — 1–3 sentences is fine if straightforward, or use bullets if there are multiple distinct points.",
+  "temperature": "Temperature range and tolerance in bullet format:\n• Ideal range in °F and °C\n• Cold and heat tolerance limits\n• Whether to keep away from drafts, vents, or radiators",
+  "soil": "Soil and repotting guidance in bullet format:\n• Best soil mix and drainage needs\n• When and how to repot\n• Pot size guidance",
+  "toxicity": "Whether toxic to cats, dogs, or humans — be specific about symptoms if toxic. 1–2 sentences.",
+  "common_problems": "The most frequent issues in bullet format — one bullet per problem:\n• [Problem name]: cause and how to treat",
+  "growth_habits": "Growth characteristics — 2–3 sentences or bullets covering size at maturity, growth rate, and notable growth pattern.",
+  "propagation": "Propagation methods in bullet format:\n• [Method]: brief steps",
+  "pruning_tips": "Pruning guidance in bullet format:\n• When to prune (season or growth stage)\n• What to remove and why\n• How to make clean cuts",
+  "disease_symptoms": "Visual symptoms to watch for in bullet format — one bullet per condition:\n• [Disease/Pest/Deficiency]: what it looks like and how to treat it"
 }
+
+IMPORTANT: Within each JSON string value, use '\\n• ' (newline + bullet) to separate distinct points where bullet format is requested above. This makes the content easy to read in the app.
 
 If the species name is unrecognized or too vague to give reliable care information, still return the JSON but note the uncertainty in the relevant fields.`
 }

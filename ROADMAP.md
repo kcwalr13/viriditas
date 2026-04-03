@@ -168,6 +168,22 @@ A new user sees an empty grid with no context about what Viriditas does.
 
 ---
 
+### Phase 11F — Plant Encyclopedia ✅
+An ad-hoc lookup tool for any plant, whether or not the user has it registered. Accessible via the Explore tab in the bottom nav.
+
+| Task | Status |
+|---|---|
+| `suggest-species` Edge Function — takes a freeform query, returns 4–6 candidate species (handles misspellings + common names) | ✅ |
+| Disambiguation grid — 2-col card layout with Wikipedia thumbnails; user selects the plant they mean | ✅ |
+| `identify-species` Edge Function — identifies species from a base64 photo; no storage needed | ✅ |
+| Photo search — upload/snap a photo → identify → fetch profile directly | ✅ |
+| `fetch-species-info` prompt updated to produce bullet-formatted content for multi-item sections | ✅ |
+| `FormattedContent` renderer — smart bullet/paragraph rendering in the profile view | ✅ |
+| `pruning_tips` and `disease_symptoms` columns added to `species_profiles` table | ✅ |
+| "Back to results" button on profile view returns user to the suggestion grid | ✅ |
+
+---
+
 ## Phase 12 — Depth & Botanical Intelligence ⬜
 These features make the app meaningfully better for anyone who takes plant care seriously.
 
@@ -255,6 +271,8 @@ These matter once users have 10+ plants and have been using the app daily for we
 - **2026-04-03** — Phase 11E complete: first-time UX improvements. Empty state now shows feature-highlight cards (AI analysis, care tracking, species guides). Plant detail no-photo placeholder is now a tappable CTA that opens the file picker and explains that photos unlock AI analysis.
 - **2026-04-03** — Phase M9 complete: PWA verified on Android Chrome and iOS Safari. App installs to home screen and runs in standalone mode on both platforms.
 - **2026-04-03** — All critical phases complete (M1–M9, 11D, 11E). App is ready to share with real users. Next: Phase 12 depth features.
+- **2026-04-03** — Phase 11F complete: Plant Encyclopedia (Explore tab). Text search uses new `suggest-species` Edge Function to show a disambiguation grid with Wikipedia thumbnails before loading a profile. Photo search identifies species directly via `identify-species` Edge Function. Species profiles now use bullet-formatted content via `FormattedContent` renderer. Two new profile sections: Pruning Tips and Disease & Symptoms. `pruning_tips` and `disease_symptoms` columns added to `species_profiles` table.
+- **2026-04-03** — Search disambiguation design decision: text search always shows a 2-col suggestion grid first (even for unambiguous queries) so users can confirm the match before the AI fetches a full profile. Photo search goes directly to profile — the photo already identifies the specific plant, so disambiguation isn't needed.
 
 ---
 

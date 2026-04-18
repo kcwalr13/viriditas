@@ -15,16 +15,19 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   maximumScale: 1,
-  // Prevents iOS Safari from zooming in on input focus
   userScalable: false,
-  // Theme color matches brand green for browser chrome on mobile
-  themeColor: '#2d6a4f',
+  // Theme color matches the new paper palette so the browser chrome blends in.
+  themeColor: '#F4EFE6',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="bg-white text-gray-900 antialiased">
+      <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+      </head>
+      <body className="bg-paper text-ink antialiased">
         {children}
       </body>
     </html>

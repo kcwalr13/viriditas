@@ -1,57 +1,82 @@
 'use client'
 // app/(app)/explore/page.tsx
 //
-// Plant Encyclopedia — ad-hoc lookup tool.
+// Field Guide — the plant encyclopedia, redesigned as a browsable library.
+// Editorial header + search rail + AI-identify hero + category grid +
+// featured species carousel + recently-viewed list. Selecting a suggestion
+// or photo-identifying a plant opens the full species detail view.
 //
 // Text search flow:
-//   1. User types a name (even misspelled) → calls suggest-species
-//   2. App shows a 2-column grid of candidate species with Wikipedia thumbnails
-//   3. User taps the plant they mean → calls fetch-species-info → shows profile
+//   1. User types → suggest-species → 2-col suggestion grid with Wikipedia thumbs
+//   2. User taps a suggestion → fetch-species-info → species detail
 //
 // Photo search flow:
-//   Upload/snap a photo → calls identify-species (base64, no storage)
-//   → gets species name → calls fetch-species-info → shows profile directly
-//
-// Species profiles are formatted with bullet points for multi-item sections
-// via the FormattedContent component below.
+//   Upload/snap → identify-species → fetch-species-info → species detail
 
 import { createClient } from '@/lib/supabase/client'
 import { formatTimestamp } from '@/lib/utils'
 import type { SpeciesProfile } from '@/lib/types'
-import { useState, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { BigTitle, HairlineButton, SectionLabel } from '@/components/ui'
+import { Icon } from '@/components/Icon'
+import { PlantPhoto, paletteFor } from '@/components/PlantPhoto'
 
-// ── Local types ───────────────────────────────────────────────────────────────
-
-// What the suggest-species Edge Function returns per candidate
 interface SuggestionBase {
   scientificName: string
   commonName: string
   description: string
 }
-
-// After the browser fetches Wikipedia thumbnails, we add thumbnailUrl
 interface Suggestion extends SuggestionBase {
   thumbnailUrl: string | null
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
+const CATEGORIES = [
+  { name: 'Beginner-friendly',    count: 24 },
+  { name: 'Low light',            count: 18 },
+  { name: 'Pet-safe',             count: 31 },
+  { name: 'Trailing & climbing',  count: 14 },
+  { name: 'Blooming houseplants', count: 22 },
+  { name: 'Desert & succulent',   count: 19 },
+]
+
+const FEATURED = [
+  { scientific: 'Monstera deliciosa',     common: 'Swiss cheese plant',   difficulty: 'Easy' },
+  { scientific: 'Ficus lyrata',           common: 'Fiddle Leaf Fig',      difficulty: 'Fussy' },
+  { scientific: 'Sansevieria trifasciata', common: 'Snake Plant',         difficulty: 'Easy' },
+  { scientific: 'Calathea orbifolia',     common: 'Prayer plant',         difficulty: 'Tricky' },
+  { scientific: 'Pilea peperomioides',    common: 'Chinese money plant',  difficulty: 'Easy' },
+  { scientific: 'Epipremnum aureum',      common: 'Pothos',               difficulty: 'Beginner' },
+]
+
+// Recently viewed — persisted in localStorage so refreshing doesn't wipe it.
+const RECENT_KEY = 'viriditas.explore.recent'
+function loadRecent(): string[] {
+  if (typeof window === 'undefined') return []
+  try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]') } catch { return [] }
+}
+function pushRecent(name: string) {
+  if (typeof window === 'undefined') return
+  const existing = loadRecent().filter(n => n !== name)
+  const next = [name, ...existing].slice(0, 6)
+  localStorage.setItem(RECENT_KEY, JSON.stringify(next))
+}
 
 export default function ExplorePage() {
   const supabase = createClient()
 
-  // ── State ────────────────────────────────────────────────────────────────
-  const [nameQuery,      setNameQuery]      = useState('')
-  const [suggestions,    setSuggestions]    = useState<Suggestion[]>([])
+  const [nameQuery, setNameQuery] = useState('')
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
   const [suggestLoading, setSuggestLoading] = useState(false)
-  const [profile,        setProfile]        = useState<SpeciesProfile | null>(null)
+  const [profile, setProfile] = useState<SpeciesProfile | null>(null)
   const [identifiedName, setIdentifiedName] = useState<string | null>(null)
-  const [loading,        setLoading]        = useState(false)
-  const [photoLoading,   setPhotoLoading]   = useState(false)
-  const [error,          setError]          = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [photoLoading, setPhotoLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [recent, setRecent] = useState<string[]>([])
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // ── Auth helper ───────────────────────────────────────────────────────────
+  useEffect(() => { setRecent(loadRecent()) }, [])
 
   async function getToken(): Promise<string> {
     const { data: { session } } = await supabase.auth.getSession()
@@ -59,17 +84,12 @@ export default function ExplorePage() {
     return session.access_token
   }
 
-  // ── Suggestions (text search, step 1) ────────────────────────────────────
-
-  // Fetches candidate species from suggest-species, then enriches each one
-  // with a thumbnail from the free Wikipedia REST API.
   async function fetchSuggestions(query: string) {
     setSuggestLoading(true)
     setSuggestions([])
     setProfile(null)
     setIdentifiedName(null)
     setError(null)
-
     try {
       const token = await getToken()
       const { data, error: fnError } = await supabase.functions.invoke('suggest-species', {
@@ -79,16 +99,11 @@ export default function ExplorePage() {
       if (fnError) throw new Error(fnError.message)
       if (data?.error) throw new Error(data.error)
 
-      const rawSuggestions: SuggestionBase[] = data?.suggestions ?? []
-
-      // Fetch Wikipedia thumbnails in parallel — failures are silently ignored
-      // so a missing article never blocks the whole list from appearing.
+      const raw: SuggestionBase[] = data?.suggestions ?? []
       const withThumbs: Suggestion[] = await Promise.all(
-        rawSuggestions.map(async (s) => {
+        raw.map(async s => {
           try {
-            const res = await fetch(
-              `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(s.scientificName)}`
-            )
+            const res = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(s.scientificName)}`)
             if (!res.ok) return { ...s, thumbnailUrl: null }
             const wiki = await res.json()
             return { ...s, thumbnailUrl: (wiki.thumbnail?.source as string) ?? null }
@@ -97,7 +112,6 @@ export default function ExplorePage() {
           }
         })
       )
-
       setSuggestions(withThumbs)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Search failed. Please try again.')
@@ -106,10 +120,6 @@ export default function ExplorePage() {
     }
   }
 
-  // ── Profile fetch (text search, step 2 / photo search, step 2) ───────────
-
-  // Calls fetch-species-info and displays the full care profile.
-  // forceRefresh=true bypasses the cache and regenerates from AI.
   async function fetchProfile(speciesName: string, forceRefresh = false) {
     setLoading(true)
     setError(null)
@@ -122,12 +132,11 @@ export default function ExplorePage() {
       })
       if (fnError) throw new Error(fnError.message)
       if (data?.error) throw new Error(data.error)
-      if (data?.profile) {
-        setProfile(data.profile)
-        setSuggestions([]) // hide the suggestion list once a profile is shown
-      } else {
-        throw new Error('No profile returned.')
-      }
+      if (!data?.profile) throw new Error('No profile returned.')
+      setProfile(data.profile)
+      setSuggestions([])
+      pushRecent(speciesName.trim())
+      setRecent(loadRecent())
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Could not fetch species info.')
     } finally {
@@ -135,28 +144,11 @@ export default function ExplorePage() {
     }
   }
 
-  // ── Name search handler ───────────────────────────────────────────────────
-
   async function handleNameSearch(e: React.FormEvent) {
     e.preventDefault()
     if (!nameQuery.trim()) return
     await fetchSuggestions(nameQuery)
   }
-
-  // ── Suggestion selection ──────────────────────────────────────────────────
-
-  async function selectSuggestion(scientificName: string) {
-    await fetchProfile(scientificName)
-  }
-
-  // Go back from a profile to the suggestions list
-  function handleBack() {
-    setProfile(null)
-    setIdentifiedName(null)
-    setError(null)
-  }
-
-  // ── Photo search handler ──────────────────────────────────────────────────
 
   async function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -171,28 +163,21 @@ export default function ExplorePage() {
 
     try {
       const base64 = await fileToBase64(file)
-      const token  = await getToken()
-
-      // Step 1: identify the species from the photo
+      const token = await getToken()
       const { data, error: fnError } = await supabase.functions.invoke('identify-species', {
         body: { imageBase64: base64, mimeType: file.type },
         headers: { Authorization: `Bearer ${token}` },
       })
       if (fnError) throw new Error(fnError.message)
       if (data?.error) throw new Error(data.error)
-
       const speciesName: string | null = data?.speciesName ?? null
-
       if (!speciesName) {
-        setError("Couldn't identify a plant in that photo. Try a clearer image, or search by name.")
+        setError("Couldn't identify a plant in that photo. Try a clearer image or search by name.")
         setPhotoLoading(false)
         return
       }
-
       setIdentifiedName(speciesName)
       setPhotoLoading(false)
-
-      // Step 2: fetch the full care profile for the identified species
       await fetchProfile(speciesName)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Photo identification failed.')
@@ -200,151 +185,237 @@ export default function ExplorePage() {
     }
   }
 
-  // Converts a File to a raw base64 string (strips the data: URI prefix)
-  function fileToBase64(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => {
-        const result = reader.result as string
-        resolve(result.split(',')[1])
-      }
-      reader.onerror = reject
-      reader.readAsDataURL(file)
-    })
+  function handleBack() {
+    setProfile(null)
+    setIdentifiedName(null)
+    setError(null)
   }
 
   const isSearching = loading || photoLoading || suggestLoading
   const showSuggestions = !profile && suggestions.length > 0
-
-  // ── Render ────────────────────────────────────────────────────────────────
+  const showLibrary = !profile && !showSuggestions && !isSearching
 
   return (
-    <div className="px-4 pt-6 pb-4">
-
-      {/* ── Header ──────────────────────────────────────────────────────── */}
-      <div className="mb-5">
-        <h1 className="text-2xl font-bold text-gray-900">Explore Plants</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Look up care guides for any houseplant by name or photo.
-        </p>
-      </div>
-
-      {/* ── Search controls (always visible) ────────────────────────────── */}
-      <form onSubmit={handleNameSearch} className="flex gap-2 mb-3">
-        <input
-          type="text"
-          value={nameQuery}
-          onChange={e => setNameQuery(e.target.value)}
-          placeholder="e.g. Monstera, Pothos, filadendren…"
-          className="flex-1 border border-gray-200 rounded-xl px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand/30 focus:border-brand"
-          disabled={isSearching}
-        />
-        <button
-          type="submit"
-          disabled={isSearching || !nameQuery.trim()}
-          className="bg-brand text-white font-semibold px-4 py-3 rounded-xl text-sm hover:bg-brand-light transition-colors disabled:opacity-50"
-        >
-          Search
-        </button>
-      </form>
-
-      <button
-        onClick={() => fileInputRef.current?.click()}
-        disabled={isSearching}
-        className="w-full flex items-center justify-center gap-2 border-2 border-dashed border-gray-200 rounded-xl py-3 text-sm text-gray-500 hover:border-brand hover:text-brand transition-colors disabled:opacity-50 mb-5"
-      >
-        <span className="text-lg">📸</span>
-        <span className="font-medium">Identify from a photo</span>
-      </button>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={handlePhotoChange}
-      />
-
-      {/* ── Loading states ───────────────────────────────────────────────── */}
-      {suggestLoading && (
-        <div className="text-center py-8 text-gray-500">
-          <div className="text-4xl mb-3 animate-pulse">🔍</div>
-          <p className="text-sm font-medium">Finding matches…</p>
+    <div className="pb-8">
+      {/* ── Header ────────────────────────────────────────────────────── */}
+      {!profile && (
+        <div className="px-5 pt-9 pb-0">
+          <div className="font-mono text-[10px] tracking-[0.24em] uppercase text-ink-muted mb-2">
+            Field Guide
+          </div>
+          <BigTitle>
+            Explore the<br />
+            <span className="italic text-accent">houseplant world</span>
+          </BigTitle>
         </div>
       )}
-      {photoLoading && (
-        <div className="text-center py-8 text-gray-500">
-          <div className="text-4xl mb-3 animate-pulse">📸</div>
-          <p className="text-sm font-medium">Identifying plant…</p>
-        </div>
+
+      {/* ── Search bar + photo button ─────────────────────────────────── */}
+      {!profile && (
+        <>
+          <form onSubmit={handleNameSearch} className="px-5 pt-4">
+            <div className="flex items-center gap-2.5 px-3.5 py-3 bg-card border border-rule rounded-full">
+              <Icon name="search" size={16} className="text-ink-soft shrink-0" />
+              <input
+                type="text"
+                value={nameQuery}
+                onChange={e => setNameQuery(e.target.value)}
+                placeholder="Search by name…"
+                disabled={isSearching}
+                className="flex-1 bg-transparent text-[13px] text-ink placeholder:text-ink-muted"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                aria-label="Identify from a photo"
+                disabled={isSearching}
+                className="w-7 h-7 rounded-full bg-ink flex items-center justify-center disabled:opacity-50"
+              >
+                <Icon name="camera" size={13} stroke={1.9} className="text-paper" />
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={handlePhotoChange}
+              />
+            </div>
+          </form>
+
+          {/* ── AI identify hero ────────────────────────────────────── */}
+          <div className="px-5 pt-3.5">
+            <div className="relative overflow-hidden rounded-brand-lg p-5 bg-ink text-paper">
+              <div
+                className="absolute w-[180px] h-[180px] rounded-full"
+                style={{ right: -20, top: -20, background: '#4C6A48', opacity: 0.3 }}
+              />
+              <div className="relative">
+                <div className="inline-flex items-center gap-1.5 text-[10px] tracking-[0.16em] uppercase mb-2 font-mono" style={{ color: '#B9C9A8' }}>
+                  <Icon name="sparkle" size={10} stroke={1.9} /> AI Identify
+                </div>
+                <div className="font-serif italic text-[22px] leading-[1.15] tracking-[-0.01em] max-w-[240px]">
+                  Point your camera at any plant to identify it.
+                </div>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isSearching}
+                  className="mt-3.5 inline-flex items-center gap-1.5 px-4 py-2.5 rounded-full bg-paper text-ink text-[13px] font-medium disabled:opacity-50"
+                >
+                  <Icon name="camera" size={14} stroke={1.9} />
+                  Identify a plant
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
       )}
+
+      {/* ── Loading ───────────────────────────────────────────────────── */}
+      {suggestLoading && <LoadingBlock icon="search" text="Finding matches…" />}
+      {photoLoading && <LoadingBlock icon="camera" text="Identifying plant…" />}
       {loading && !photoLoading && (
-        <div className="text-center py-8 text-gray-500">
-          <div className="text-4xl mb-3 animate-pulse">🌿</div>
-          <p className="text-sm font-medium">Fetching care guide…</p>
-          {identifiedName && (
-            <p className="text-xs text-brand mt-1">Identified: {identifiedName}</p>
-          )}
-        </div>
+        <LoadingBlock icon="leaf" text={`Fetching care guide${identifiedName ? ` for ${identifiedName}` : '…'}`} />
       )}
 
-      {/* ── Error ───────────────────────────────────────────────────────── */}
+      {/* ── Error ─────────────────────────────────────────────────────── */}
       {error && !isSearching && (
-        <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3 text-sm text-red-700">
+        <div className="mx-5 mt-4 px-3 py-2 bg-danger-soft border border-rule rounded-brand text-sm text-danger">
           {error}
         </div>
       )}
 
-      {/* ── Suggestion grid ──────────────────────────────────────────────── */}
-      {showSuggestions && !isSearching && (
-        <div>
-          <p className="text-xs text-gray-500 mb-3">
-            {suggestions.length} matches — tap the one you mean
-          </p>
-          <div className="grid grid-cols-2 gap-3">
-            {suggestions.map((s) => (
+      {/* ── Suggestions ───────────────────────────────────────────────── */}
+      {showSuggestions && (
+        <>
+          <SectionLabel number="§ —" title={`${suggestions.length} matches — tap one`} />
+          <div className="grid grid-cols-2 gap-2.5 px-5">
+            {suggestions.map(s => (
               <button
                 key={s.scientificName}
-                onClick={() => selectSuggestion(s.scientificName)}
-                className="bg-white rounded-xl border border-gray-200 overflow-hidden text-left hover:border-brand hover:shadow-sm active:scale-95 transition-all"
+                onClick={() => fetchProfile(s.scientificName)}
+                className="bg-card border border-rule rounded-brand overflow-hidden text-left"
               >
-                {/* Thumbnail — Wikipedia photo or green placeholder */}
-                <div className="w-full aspect-square bg-brand-bg flex items-center justify-center overflow-hidden">
+                <div className="relative w-full aspect-square bg-paper-alt">
                   {s.thumbnailUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={s.thumbnailUrl}
-                      alt={s.commonName}
-                      className="w-full h-full object-cover"
-                    />
+                    <img src={s.thumbnailUrl} alt={s.commonName} className="w-full h-full object-cover" />
                   ) : (
-                    <span className="text-5xl">🌿</span>
+                    <PlantPhoto name={s.scientificName} label={s.commonName} />
                   )}
                 </div>
-                {/* Text info */}
                 <div className="p-3">
-                  <p className="text-sm font-semibold text-gray-900 leading-tight">
-                    {s.commonName}
-                  </p>
-                  <p className="text-xs italic text-gray-500 mt-0.5 leading-tight">
-                    {s.scientificName}
-                  </p>
-                  <p className="text-xs text-gray-600 mt-1.5 leading-snug line-clamp-3">
-                    {s.description}
-                  </p>
+                  <div className="font-serif italic text-[16px] text-ink leading-tight">{s.commonName}</div>
+                  <div className="text-[11px] text-ink-muted mt-0.5 italic truncate">{s.scientificName}</div>
+                  <p className="text-[11px] text-ink-soft mt-1.5 leading-snug line-clamp-3">{s.description}</p>
                 </div>
               </button>
             ))}
           </div>
-        </div>
+        </>
       )}
 
-      {/* ── Species profile ──────────────────────────────────────────────── */}
+      {/* ── Library (default) ─────────────────────────────────────────── */}
+      {showLibrary && (
+        <>
+          <SectionLabel number="§ 01" title="Browse by category" />
+          <div className="grid grid-cols-2 gap-2 px-5">
+            {CATEGORIES.map((c, i) => {
+              const [tp, bt] = paletteFor(c.name)
+              return (
+                <button
+                  key={c.name}
+                  onClick={() => { setNameQuery(c.name); fetchSuggestions(c.name) }}
+                  className="relative overflow-hidden p-3.5 bg-card border border-rule rounded-brand text-left flex flex-col gap-5 h-[120px]"
+                >
+                  <div
+                    className="absolute rounded-full"
+                    style={{
+                      top: -10, right: -10, width: 60, height: 60,
+                      background: `linear-gradient(155deg, ${tp}, ${bt})`, opacity: 0.9,
+                    }}
+                  />
+                  <div className="font-mono text-[10px] text-ink-muted tracking-[0.1em] relative">
+                    N° {String(i + 1).padStart(2, '0')}
+                  </div>
+                  <div className="relative mt-auto">
+                    <div className="font-serif italic text-[16px] text-ink leading-tight tracking-[-0.01em]">
+                      {c.name}
+                    </div>
+                    <div className="text-[11px] text-ink-soft mt-0.5">{c.count} species</div>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+
+          <SectionLabel number="§ 02" title="Featured this season" />
+          <div className="vr-scroll flex gap-2.5 px-5 overflow-x-auto pb-1">
+            {FEATURED.map(s => (
+              <button
+                key={s.scientific}
+                onClick={() => fetchProfile(s.scientific)}
+                className="shrink-0 w-[180px] text-left"
+              >
+                <div className="relative w-[180px] h-[220px] rounded-brand overflow-hidden border border-rule">
+                  <PlantPhoto name={s.scientific} label={s.common} />
+                </div>
+                <div className="pt-2">
+                  <div className="font-serif italic text-[16px] text-ink tracking-[-0.01em]">{s.common}</div>
+                  <div className="text-[11px] text-ink-muted mt-0.5 italic">{s.scientific}</div>
+                  <div className="mt-1.5">
+                    <span
+                      className={`inline-block font-mono text-[9px] tracking-[0.08em] uppercase px-1.5 py-0.5 rounded-full ${
+                        s.difficulty === 'Easy' || s.difficulty === 'Beginner'
+                          ? 'bg-accent-soft text-accent'
+                          : s.difficulty === 'Tricky'
+                          ? 'bg-warn-soft text-warn'
+                          : 'bg-danger-soft text-danger'
+                      }`}
+                    >
+                      {s.difficulty}
+                    </span>
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+
+          {recent.length > 0 && (
+            <>
+              <SectionLabel number="§ 03" title="Recently viewed" />
+              <div className="px-5 flex flex-col gap-1.5">
+                {recent.map((name, i) => (
+                  <button
+                    key={name}
+                    onClick={() => fetchProfile(name)}
+                    className="w-full px-3.5 py-3 flex items-center gap-3 bg-card border border-rule rounded-brand"
+                  >
+                    <span className="font-mono text-[10px] text-ink-muted w-5 shrink-0">
+                      {String(i + 1).padStart(2, '0')}
+                    </span>
+                    <div className="w-[38px] h-[38px] rounded-lg overflow-hidden border border-rule">
+                      <PlantPhoto name={name} showLabel={false} />
+                    </div>
+                    <div className="flex-1 text-left">
+                      <div className="font-serif italic text-[15px] text-ink truncate">{name}</div>
+                    </div>
+                    <Icon name="chev" size={14} className="text-ink-muted" />
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </>
+      )}
+
+      {/* ── Species detail ────────────────────────────────────────────── */}
       {profile && !isSearching && (
-        <SpeciesProfileCard
+        <SpeciesDetail
           profile={profile}
           identifiedFrom={identifiedName}
-          onBack={suggestions.length > 0 ? handleBack : undefined}
+          onBack={handleBack}
           onRefresh={() => fetchProfile(profile.species_name, true)}
         />
       )}
@@ -352,28 +423,203 @@ export default function ExplorePage() {
   )
 }
 
-// ── Formatted content renderer ────────────────────────────────────────────────
-// Renders a species profile text value with smart formatting:
-//   • Lines starting with "• " or "- " become a styled bullet list
-//   • Multiple paragraphs (separated by blank lines) are stacked
-//   • Plain text falls back to a single paragraph
+// ─── Sub-components ────────────────────────────────────────────────────
+
+function LoadingBlock({ icon, text }: { icon: 'search' | 'camera' | 'leaf'; text: string }) {
+  return (
+    <div className="text-center py-10 text-ink-soft">
+      <Icon name={icon} size={28} className="text-accent animate-pulse mx-auto" />
+      <p className="text-sm font-medium mt-2">{text}</p>
+    </div>
+  )
+}
+
+function SpeciesDetail({
+  profile, identifiedFrom, onBack, onRefresh,
+}: {
+  profile: SpeciesProfile
+  identifiedFrom: string | null
+  onBack: () => void
+  onRefresh: () => void
+}) {
+  return (
+    <div>
+      {/* Hero */}
+      <div className="relative h-[280px] overflow-hidden">
+        <PlantPhoto name={profile.species_name} showLabel={false} />
+        <button
+          onClick={onBack}
+          aria-label="Back"
+          className="absolute top-10 left-4 w-10 h-10 rounded-full flex items-center justify-center"
+          style={{ background: 'rgba(255,255,255,0.9)' }}
+        >
+          <Icon name="back" size={18} stroke={1.9} className="text-ink" />
+        </button>
+        <div
+          className="absolute bottom-0 left-0 right-0 h-32 pointer-events-none"
+          style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.55), transparent)' }}
+        />
+        <div className="absolute bottom-4 left-5 right-5 text-white">
+          <div className="font-mono text-[10px] tracking-[0.16em] uppercase opacity-80 mb-1">
+            {identifiedFrom ? 'Identified from photo' : 'From the Field Guide'}
+          </div>
+          <div className="font-serif italic text-[32px] leading-none tracking-[-0.02em]">
+            {profile.common_names?.split(',')[0]?.trim() ?? profile.species_name}
+          </div>
+          {profile.scientific_name && (
+            <div className="text-[13px] mt-1 opacity-85 italic">{profile.scientific_name}</div>
+          )}
+        </div>
+      </div>
+
+      {/* Quick facts */}
+      <div className="px-5 py-3.5 bg-paper-alt border-b border-rule grid grid-cols-3 gap-2.5">
+        <QuickFact icon="sun"     label="Light"    value={shortPreview(profile.light)} />
+        <QuickFact icon="drop"    label="Water"    value={shortPreview(profile.watering)} />
+        <QuickFact icon="warning" label="Pets"     value={toxicityShort(profile.toxicity)} tone={profile.toxicity?.toLowerCase().includes('toxic') ? 'danger' : 'good'} />
+      </div>
+
+      {/* Sections */}
+      <SectionLabel number="§ 01" title="Care" />
+      <div className="mx-5 px-4 py-1 bg-card border border-rule rounded-brand-lg">
+        <CareSection icon="sun"         title="Light"       text={profile.light} />
+        <CareSection icon="drop"        title="Watering"    text={profile.watering} />
+        <CareSection icon="humidity"    title="Humidity"    text={profile.humidity} />
+        <CareSection icon="thermometer" title="Temperature" text={profile.temperature} />
+        <CareSection icon="soil"        title="Soil"        text={profile.soil} />
+        <CareSection icon="scissors"    title="Pruning"     text={profile.pruning_tips} last />
+      </div>
+
+      {profile.common_problems && (
+        <>
+          <SectionLabel number="§ 02" title="Common problems" />
+          <div className="px-5 flex flex-col gap-1.5">
+            {splitLines(profile.common_problems).map((p, i) => (
+              <div key={i} className="flex gap-3 px-3.5 py-2.5 bg-card border border-rule rounded-brand">
+                <div className="w-7 h-7 rounded-full bg-paper-alt flex items-center justify-center shrink-0">
+                  <Icon name="warning" size={14} stroke={1.9} className="text-warn" />
+                </div>
+                <div className="flex-1 text-[13px] text-ink leading-snug">{p}</div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {profile.disease_symptoms && (
+        <>
+          <SectionLabel number="§ 03" title="Disease &amp; symptoms" />
+          <div className="mx-5 px-4 py-1 bg-card border border-rule rounded-brand-lg">
+            <CareSection icon="bug" title="Signs to watch" text={profile.disease_symptoms} last />
+          </div>
+        </>
+      )}
+
+      {profile.toxicity && (
+        <>
+          <SectionLabel number="§ 04" title="Toxicity" />
+          <div className="mx-5 px-4 py-3 bg-card border border-rule rounded-brand-lg">
+            <p className="font-serif text-[14px] text-ink leading-relaxed" style={{ textWrap: 'pretty' as React.CSSProperties['textWrap'] }}>
+              {profile.toxicity}
+            </p>
+          </div>
+        </>
+      )}
+
+      {profile.growth_habits && (
+        <>
+          <SectionLabel number="§ 05" title="Growth" />
+          <div className="px-5">
+            <p className="font-serif text-[15px] text-ink leading-relaxed" style={{ textWrap: 'pretty' as React.CSSProperties['textWrap'] }}>
+              {profile.growth_habits}
+            </p>
+          </div>
+        </>
+      )}
+
+      {profile.propagation && (
+        <>
+          <SectionLabel number="§ 06" title="Propagation" />
+          <div className="px-5">
+            <p className="font-serif text-[15px] text-ink leading-relaxed" style={{ textWrap: 'pretty' as React.CSSProperties['textWrap'] }}>
+              {profile.propagation}
+            </p>
+          </div>
+        </>
+      )}
+
+      <div className="mt-6 mx-5 flex items-center justify-between">
+        <p className="text-[11px] text-ink-muted font-mono tracking-[0.06em]">
+          Guide generated {formatTimestamp(profile.fetched_at)}
+        </p>
+        <HairlineButton variant="outline" onClick={onRefresh}>
+          <Icon name="sparkle" size={12} stroke={1.9} /> Refresh
+        </HairlineButton>
+      </div>
+
+      <div className="mt-5 px-5">
+        <HairlineButton variant="outline" onClick={onBack} fullWidth>
+          <Icon name="back" size={14} stroke={1.9} /> Back to library
+        </HairlineButton>
+      </div>
+    </div>
+  )
+}
+
+function QuickFact({
+  icon, label, value, tone,
+}: {
+  icon: 'sun' | 'drop' | 'warning'
+  label: string
+  value: string
+  tone?: 'danger' | 'good'
+}) {
+  const color = tone === 'danger' ? 'text-danger' : 'text-accent'
+  return (
+    <div>
+      <div className="flex items-center gap-1.5 mb-1">
+        <Icon name={icon} size={12} stroke={1.9} className={color} />
+        <div className="font-mono text-[9px] tracking-[0.1em] uppercase text-ink-muted">{label}</div>
+      </div>
+      <div className="font-sans text-[12px] text-ink font-medium line-clamp-2">{value}</div>
+    </div>
+  )
+}
+
+function CareSection({
+  icon, title, text, last,
+}: {
+  icon: 'sun' | 'drop' | 'humidity' | 'thermometer' | 'soil' | 'scissors' | 'bug'
+  title: string
+  text: string | null
+  last?: boolean
+}) {
+  if (!text) return null
+  return (
+    <div className={`py-3.5 ${last ? '' : 'border-b border-dashed border-rule'}`}>
+      <div className="flex items-center gap-2.5 mb-1.5">
+        <Icon name={icon} size={14} stroke={1.9} className="text-accent" />
+        <div className="font-mono text-[10px] tracking-[0.14em] uppercase text-ink-soft font-semibold">
+          {title}
+        </div>
+      </div>
+      <FormattedContent text={text} />
+    </div>
+  )
+}
 
 function FormattedContent({ text }: { text: string }) {
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
-
-  // Detect bullet-formatted content
   const hasBullets = lines.some(l => l.startsWith('• ') || l.startsWith('- ') || l.startsWith('* '))
-
   if (hasBullets) {
     return (
-      <ul className="space-y-2">
+      <ul className="space-y-1.5">
         {lines.map((line, i) => {
-          // Strip the bullet character
-          const content = line.replace(/^[•\-\*]\s*/, '').trim()
+          const content = line.replace(/^[•\-*]\s*/, '').trim()
           if (!content) return null
           return (
-            <li key={i} className="flex gap-2 text-sm text-gray-700 leading-relaxed">
-              <span className="text-brand mt-0.5 flex-shrink-0 select-none">•</span>
+            <li key={i} className="flex gap-2 items-start text-[14px] text-ink leading-snug font-serif">
+              <span className="text-ink-muted font-mono mt-0.5 select-none">—</span>
               <span>{content}</span>
             </li>
           )
@@ -381,100 +627,50 @@ function FormattedContent({ text }: { text: string }) {
       </ul>
     )
   }
-
-  // Multiple paragraphs (double-newline separation)
   const paragraphs = text.split(/\n\n+/).map(p => p.trim()).filter(Boolean)
   if (paragraphs.length > 1) {
     return (
       <div className="space-y-2">
         {paragraphs.map((p, i) => (
-          <p key={i} className="text-sm text-gray-700 leading-relaxed">{p}</p>
+          <p key={i} className="font-serif text-[14px] text-ink leading-relaxed" style={{ textWrap: 'pretty' as React.CSSProperties['textWrap'] }}>
+            {p}
+          </p>
         ))}
       </div>
     )
   }
-
-  // Plain text
-  return <p className="text-sm text-gray-700 leading-relaxed">{text}</p>
+  return (
+    <p className="font-serif text-[14px] text-ink leading-relaxed" style={{ textWrap: 'pretty' as React.CSSProperties['textWrap'] }}>
+      {text}
+    </p>
+  )
 }
 
-// ── Species Profile Card ──────────────────────────────────────────────────────
-// Displays the full encyclopedic profile for a species.
+// ─── helpers ───────────────────────────────────────────────────────────
 
-function SpeciesProfileCard({
-  profile,
-  identifiedFrom,
-  onBack,
-  onRefresh,
-}: {
-  profile: SpeciesProfile
-  identifiedFrom: string | null
-  onBack?: () => void
-  onRefresh: () => void
-}) {
-  const sections: { key: string; label: string; value: string | null }[] = [
-    { key: 'light',            label: '☀️ Light',              value: profile.light            },
-    { key: 'watering',         label: '💧 Watering',           value: profile.watering         },
-    { key: 'humidity',         label: '💨 Humidity',           value: profile.humidity         },
-    { key: 'temperature',      label: '🌡️ Temperature',        value: profile.temperature      },
-    { key: 'soil',             label: '🪴 Soil & Repotting',   value: profile.soil             },
-    { key: 'pruning_tips',     label: '✂️ Pruning',            value: profile.pruning_tips     },
-    { key: 'toxicity',         label: '⚠️ Toxicity',           value: profile.toxicity         },
-    { key: 'common_problems',  label: '🐛 Common Problems',    value: profile.common_problems  },
-    { key: 'disease_symptoms', label: '🔬 Disease & Symptoms', value: profile.disease_symptoms },
-    { key: 'growth_habits',    label: '📏 Growth Habits',      value: profile.growth_habits    },
-    { key: 'propagation',      label: '🌱 Propagation',        value: profile.propagation      },
-  ]
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve((reader.result as string).split(',')[1])
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
 
-  return (
-    <div className="mt-2">
+function shortPreview(text: string | null): string {
+  if (!text) return '—'
+  const first = text.split(/[.\n]/)[0].trim()
+  return first.length > 24 ? first.slice(0, 22) + '…' : first
+}
 
-      {/* Back to results button */}
-      {onBack && (
-        <button
-          onClick={onBack}
-          className="flex items-center gap-1 text-sm text-brand font-medium mb-4 hover:underline"
-        >
-          ← Back to results
-        </button>
-      )}
+function toxicityShort(text: string | null): string {
+  if (!text) return 'Unknown'
+  const lower = text.toLowerCase()
+  if (lower.includes('non-toxic') || lower.includes('pet safe') || lower.includes('safe')) return 'Pet safe'
+  if (lower.includes('toxic')) return 'Toxic'
+  return shortPreview(text)
+}
 
-      {/* Species header */}
-      <div className="mb-4">
-        {identifiedFrom && (
-          <p className="text-xs text-brand font-medium mb-1">📸 Identified from photo</p>
-        )}
-        <h2 className="text-xl font-bold text-gray-900">
-          {profile.common_names?.split(',')[0]?.trim() ?? profile.species_name}
-        </h2>
-        {profile.scientific_name && (
-          <p className="text-sm italic text-gray-500">{profile.scientific_name}</p>
-        )}
-        {profile.common_names && (
-          <p className="text-xs text-gray-400 mt-0.5">
-            Also known as: {profile.common_names}
-          </p>
-        )}
-      </div>
-
-      {/* Care sections */}
-      <div className="space-y-3">
-        {sections.filter(s => s.value).map(section => (
-          <div key={section.key} className="bg-brand-bg rounded-xl px-4 py-3">
-            <p className="text-xs font-semibold text-brand mb-2">{section.label}</p>
-            <FormattedContent text={section.value!} />
-          </div>
-        ))}
-      </div>
-
-      {/* Cache timestamp and refresh */}
-      <p className="text-xs text-gray-400 mt-4 text-center">
-        Guide generated {formatTimestamp(profile.fetched_at)}
-        {' · '}
-        <button onClick={onRefresh} className="text-brand underline">
-          Refresh
-        </button>
-      </p>
-    </div>
-  )
+function splitLines(text: string): string[] {
+  return text.split('\n').map(l => l.trim()).filter(Boolean).map(l => l.replace(/^[•\-*]\s*/, ''))
 }

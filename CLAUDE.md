@@ -38,77 +38,82 @@ Kyle is a beginner developer who relies on Claude to write most of the code. Alw
 ```
 viriditas/
   app/
-    layout.tsx              # Root layout: metadata, global styles, PWA viewport
-    globals.css             # Tailwind base import
+    layout.tsx              # Root layout: metadata, Google Fonts preconnect, PWA viewport
+    globals.css             # Tailwind base + font imports (Source Serif 4, Inter, JetBrains Mono) + scrollbar-hide
     (auth)/
-      layout.tsx            # Unauthenticated layout (centered card, green brand header)
-      sign-in/
-        page.tsx            # Sign in form
-      sign-up/
-        page.tsx            # Sign up form
+      layout.tsx            # Unauthenticated layout (centered card)
+      sign-in/page.tsx      # Sign in form
+      sign-up/page.tsx      # Sign up form
     (app)/
-      layout.tsx            # Protected layout: auth guard + bottom nav bar
-      page.tsx              # My Plants screen — Server Component (fetches + enriches data)
-      MyPlantsClient.tsx    # My Plants screen — Client Component (renders grid, banners, streak)
+      layout.tsx            # Protected layout: auth guard + floating <BottomNav/>
+      page.tsx              # Today — Server Component (fetches plants + builds tasks, streak, journal peek)
+      TodayClient.tsx       # Today — Client Component (masthead, task list, collection strip, journal peek)
+      plants/
+        page.tsx             # Plants collection — Server Component (fetches + enriches cards)
+        PlantsClient.tsx     # Plants collection — Client (grid/list toggle, grouping chips)
       add-plant/
-        page.tsx            # Add Plant form
+        page.tsx             # Add Plant — 3-step wizard (identify → place → schedule)
       plant/
         [id]/
-          page.tsx          # Plant Detail screen (Client Component — all data fetched client-side)
+          page.tsx           # Plant Detail — Client Component; single-scroll editorial layout
+      explore/
+        page.tsx             # Explore/Field Guide — category grid, featured carousel, search, species detail
       settings/
-        page.tsx            # Settings: account info, sign out, about
-  components/               # (currently empty — UI is inline in page files)
+        page.tsx             # Me — identity, sign out, about
+  components/
+    Icon.tsx                # <Icon name="drop"/> — 39 single-stroke SVGs; replaces all emoji
+    PlantPhoto.tsx          # Warm blocky gradient placeholder when no cover photo (deterministic from name)
+    ui.tsx                  # StatusPip, Chip, BigTitle, SectionLabel, HairlineButton, Scroll
+    BottomNav.tsx           # Floating pill nav: Today / Plants / Explore / Me
   lib/
     supabase/
-      client.ts             # Browser Supabase client (for Client Components)
-      server.ts             # Server Supabase client (for Server Components / Route Handlers)
-    types.ts                # Shared TypeScript types (Plant, PlantPhoto, CareLog, etc.)
-    utils.ts                # Helpers: formatDate, computeWateringStatus, computeStreak, etc.
-    notifications.ts        # Stub — push notifications not supported on web; no-op exports
+      client.ts             # Browser Supabase client
+      server.ts             # Server Supabase client (reads cookies)
+    types.ts                # Plant, PlantPhoto, CareLog, AnalysisResult, SpeciesProfile
+    utils.ts                # formatDate, computeWateringStatus, computeStreak, CARE_LOG_LABELS, URGENCY_ORDER
+    notifications.ts        # Stub — web push not supported; no-op exports
   supabase/
     functions/
-      analyze-plant/
-        index.ts            # Edge Function: AI plant analysis (provider-swappable)
-      fetch-species-info/
-        index.ts            # Edge Function: AI species profile fetch (provider-swappable)
-      identify-species/
-        index.ts            # Edge Function: identify species from base64 photo (no storage)
-      suggest-species/
-        index.ts            # Edge Function: returns 4-6 candidate species for a search query
+      analyze-plant/         index.ts   # Edge Function: AI plant analysis
+      fetch-species-info/    index.ts   # Edge Function: AI species profile
+      identify-species/      index.ts   # Edge Function: species from base64 photo (no storage)
+      suggest-species/       index.ts   # Edge Function: 4-6 candidate species for a query
   scripts/
-    patch-ua-parser.js      # Prebuild script: patches __dirname out of ua-parser-js for Edge Runtime
+    patch-ua-parser.js      # Prebuild patch for ua-parser-js in Edge Runtime
   public/
-    icon.png                # App icon (plant sprout on brand green)
+    icon.png                # App icon
     manifest.json           # PWA manifest
-  middleware.ts             # Auth-gates all (app) routes; refreshes session cookies
+  middleware.ts             # Auth-gates /(app); refreshes session cookies
   next.config.ts            # Supabase Storage image domain allowlist
-  tailwind.config.ts        # Brand color palette
-  eslint.config.mjs
-  .env.local                # Never commit — NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY
+  tailwind.config.ts        # Editorial palette (paper/ink/accent) + font families
+  .env.local                # Gitignored — NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY
 ```
 
 ## What Has Been Built
 - [x] Next.js 15 project initialized with TypeScript, Tailwind CSS, App Router
 - [x] `@supabase/ssr` installed — cookie-based auth, works in Server Components and Client Components
-- [x] `lib/supabase/client.ts` — browser client (for Client Components)
-- [x] `lib/supabase/server.ts` — server client (reads cookies, for Server Components)
-- [x] `middleware.ts` — protects all `/(app)` routes; redirects to sign-in if no session
-- [x] `app/(auth)/sign-in/page.tsx` — sign in form with email/password
-- [x] `app/(auth)/sign-up/page.tsx` — sign up form with email/password
-- [x] `app/(app)/layout.tsx` — protected layout with bottom nav (My Plants / Settings)
-- [x] `app/(app)/page.tsx` + `MyPlantsClient.tsx` — My Plants: 2-col photo grid, urgency banners, care streak chip
-- [x] `app/(app)/add-plant/page.tsx` — Add Plant form (nickname, species, location, date, notes)
-- [x] `app/(app)/plant/[id]/page.tsx` — Plant Detail: Overview / History / Species tabs, photo upload, AI analysis, care logging, edit/delete, watering reminder
-- [x] `app/(app)/settings/page.tsx` — Settings: email, sign out, app version
+- [x] `middleware.ts` + `lib/supabase/{client,server}.ts` — auth-gates `/(app)` and refreshes session cookies
+- [x] `app/(auth)/sign-in/page.tsx` and `sign-up/page.tsx` — email/password auth
+- [x] **Editorial Botanical redesign (2026-04-18)** — palette, custom icon set, and screen overhauls applied to every `/(app)` route. See "Editorial Design System" section below.
+- [x] `app/(app)/layout.tsx` — paper-bg protected shell + `<BottomNav/>` (Today / Plants / Explore / Me)
+- [x] `app/(app)/page.tsx` + `TodayClient.tsx` — Today home: masthead greeting, streak strip, overdue/due-soon task list, collection carousel, AI journal peek
+- [x] `app/(app)/plants/page.tsx` + `PlantsClient.tsx` — Collection: grid/list toggle, group by all/location/status
+- [x] `app/(app)/plant/[id]/page.tsx` — Plant Detail: single-scroll editorial layout (hero, status strip, AI diagnosis card, log book, dossier, schedule, species guide, photo strip, floating care dock). All data fetched client-side.
+- [x] `app/(app)/add-plant/page.tsx` — Add Plant: 3-step wizard (identify → place → schedule). Step 1 uses `identify-species` for AI photo ID; plant row is created at step 3 submit.
+- [x] `app/(app)/explore/page.tsx` — Field Guide: AI Identify hero, category grid, featured carousel, recently-viewed (localStorage), text + photo search into species detail
+- [x] `app/(app)/settings/page.tsx` — Me: identity card, sign out, about
+- [x] `components/Icon.tsx` — 39 single-stroke SVGs replacing every emoji in the UI
+- [x] `components/ui.tsx` — BigTitle, SectionLabel, Chip, StatusPip, HairlineButton
+- [x] `components/BottomNav.tsx` — floating pill with route-based active state
+- [x] `components/PlantPhoto.tsx` — warm blocky gradient placeholder when a plant has no cover photo
 - [x] `lib/types.ts` — Plant, PlantPhoto, CareLog, AnalysisResult, SpeciesProfile types
-- [x] `lib/utils.ts` — formatDate(), formatTimestamp(), computeWateringStatus(), computeStreak(), toLocalDateStr(), CARE_LOG_LABELS, CARE_LOG_ICONS, URGENCY_ORDER
-- [x] Supabase database schema, RLS policies, and Edge Functions (see schema section below)
-- [x] `scripts/patch-ua-parser.js` — prebuild patch so Next.js middleware works in Vercel Edge Runtime
-- [x] Vercel deployment — auto-deploys on push to main; framework preset: Next.js; output: default
-- [x] `app/(app)/explore/page.tsx` — Plant Encyclopedia: text search → disambiguation grid → profile; photo search → identify → profile; `FormattedContent` renderer for bullet/paragraph formatting
-- [x] `supabase/functions/identify-species/index.ts` — Edge Function: identifies species from base64 image; returns `{ speciesName, confidence }` (no DB writes, no storage)
-- [x] `supabase/functions/suggest-species/index.ts` — Edge Function: returns 4-6 candidate species for a freeform query (handles misspellings); browser fetches Wikipedia thumbnails after
-- [x] `species_profiles` table — `pruning_tips` and `disease_symptoms` columns added; `fetch-species-info` prompt updated to request bullet-formatted content
+- [x] `lib/utils.ts` — formatDate, formatTimestamp, toLocalDateStr, computeWateringStatus, computeStreak, CARE_LOG_LABELS, URGENCY_ORDER
+- [x] Supabase schema, RLS, and Edge Functions (see schema section below)
+- [x] `scripts/patch-ua-parser.js` — prebuild patch so middleware works in Vercel Edge Runtime
+- [x] Vercel deployment — auto-deploys on push to `main`; framework preset: Next.js; output: default
+- [x] `supabase/functions/identify-species` — species from base64 photo (no storage)
+- [x] `supabase/functions/suggest-species` — 4-6 candidates for a freeform query
+- [x] `species_profiles` table — includes `pruning_tips`, `disease_symptoms`; prompts request bullet-formatted content
 
 ## What Comes Next
 See ROADMAP.md for the full feature breakdown and phase plan.
@@ -130,14 +135,69 @@ Each plant has two layers of information:
 - Refreshable by the user on demand
 - Passed as context to `analyze-plant` so health analyses are species-aware
 
+## Editorial Design System
+Introduced 2026-04-18. The whole `/(app)` surface is designed to feel like a field-guide
+journal — warm paper backgrounds, olive accents, serif display type. **No emoji in the UI.**
+
+### Palette (Tailwind tokens)
+| Token | Hex | Use |
+|---|---|---|
+| `paper` | `#F4EFE6` | Default app background |
+| `paper-alt` | `#EDE6D7` | Status strips, subtle inset panels |
+| `card` | `#FAF6EC` | Card/pill backgrounds lifted off paper |
+| `ink` | `#1F2A24` | Primary text, solid buttons |
+| `ink-soft` | `#4E5B52` | Secondary text |
+| `ink-muted` | `#8A9389` | Metadata, captions |
+| `rule` | `#D9D0BD` | Hairline borders (`border-rule`) and dashed rules |
+| `accent` | `#4C6A48` | Olive — primary actions, active links, good status |
+| `accent-soft` | `#B9C9A8` | Accent washes, chip backgrounds |
+| `warn` | `#B4571E` | Burnt orange — "due soon" |
+| `warn-soft` | `#F3E4CF` | |
+| `danger` | `#9B3A2E` | "Overdue", destructive |
+| `danger-soft` | `#EED8D3` | |
+
+### Typography
+- **Display/serif** (`font-serif`): Source Serif 4. Used for `<BigTitle/>`, plant nicknames, pull-quotes, journal entries. Often italic.
+- **UI/sans** (`font-sans`): Inter. Body text, buttons, labels.
+- **Metadata/mono** (`font-mono`): JetBrains Mono. Section numbers (`§ 01`), uppercase labels, timestamps, small captions. Usually tracked wider.
+
+Fonts are loaded from Google Fonts in `app/globals.css` with a preconnect in `app/layout.tsx`.
+
+### Icons
+- `components/Icon.tsx` exports 39 single-stroke SVG icons (leaf, drop, sun, scissors, mist, bug, move, camera, plus, check, chev, back, search, home, book, cog, calendar, edit, trash, dots, sparkle, flame, thermometer, humidity, soil, warning, room, pot, clock, heart, close, filter, grid, list, etc.).
+- Usage: `<Icon name="drop" size={16} className="text-accent" stroke={1.8}/>`.
+- Color via `className` text color (SVG `stroke` uses `currentColor`).
+
+### Primitives (`components/ui.tsx`)
+- **`<BigTitle italic={boolean} children>`** — 34px serif headline. Mix italic inline with child spans.
+- **`<SectionLabel number="§ 01" title="NEEDS WATER" action="See all" onAction={fn}/>`** — field-guide section header with optional right-side action link.
+- **`<Chip tone="accent|warn|danger|neutral" active={bool} onClick>`** — pill-shaped button, used for filters and multi-select.
+- **`<StatusPip status="overdue|due-soon|good|unset" withLabel={bool}/>`** — dot indicator for watering status.
+- **`<HairlineButton variant="solid|outline" icon="drop" fullWidth>`** — primary/secondary CTA.
+
+### Placeholder imagery (`components/PlantPhoto.tsx`)
+Plants without cover photos show a warm blocky gradient. Colors are deterministic from the plant's id or nickname (`paletteFor(key)`), so the same plant always gets the same hue. Used for both grid cards and placeholder hero images.
+
+### Bottom nav (`components/BottomNav.tsx`)
+Floating pill with four tabs: **Today / Plants / Explore / Me**. Active tab shows the label; inactive tabs show just the icon. Route matching: `/plant/[id]` and `/add-plant` highlight **Plants**.
+
+### Screen conventions
+- **Masthead pattern:** every top-level screen opens with a mono caption ("Vol. I · Saturday, April 18" style) then a `<BigTitle/>` with an italic-accent tail — e.g. "Good morning. *2 plants need you.*"
+- **Section numbers:** screens use `§ 01`, `§ 02`, `§ —` to number sections like a field guide.
+- **Scroll rails:** horizontal carousels use the `vr-scroll` class (hides the scrollbar). See `app/globals.css`.
+- **Bottom dock** (Plant Detail only): fixed care-action pill above the bottom nav. **Note:** the current implementation stacks the dock with the global bottom nav, which is cluttered — follow-up task in ROADMAP Phase 14 to hide the nav on plant detail.
+
 ## Coding Conventions
 - Use TypeScript (`.tsx` for files with JSX, `.ts` for pure logic); no `any` types
-- Use Tailwind CSS utility classes for all styling — no inline style objects, no CSS files
-- Custom colors: `text-brand` / `bg-brand` = `#2d6a4f`; `bg-brand-light` = `#40916c`; `bg-brand-bg` = `#f0faf4` (defined in tailwind.config.ts)
+- Use Tailwind CSS utility classes wherever possible — inline `style` objects are acceptable only for dynamic values Tailwind can't express (computed gradients in `PlantPhoto`, hero overlays, CSS properties with variable values like `textWrap: 'pretty'`)
+- Use Editorial palette tokens, not brand-green: `bg-paper`, `bg-card`, `bg-paper-alt`, `text-ink`, `text-ink-soft`, `text-ink-muted`, `border-rule`, `text-accent` / `bg-accent`, `bg-accent-soft`, `text-warn`, `text-danger`, `bg-warn-soft`, `bg-danger-soft` — all defined in `tailwind.config.ts`. The legacy `brand` token is still in the config (mapped to the new accent) so any un-migrated code keeps compiling, but new code should use the Editorial tokens.
+- **Never use emoji in UI.** Use `<Icon name="..."/>` from `components/Icon.tsx`. See the icon list at the top of that file. Emoji are still OK in toast/notification *text* content and server-side AI prompts.
+- Use `font-serif` for display headlines (Source Serif 4), `font-sans` for UI (Inter), `font-mono` for metadata/captions (JetBrains Mono)
 - Mark interactive components `'use client'` at the top; leave layouts and data-fetching pages as Server Components where possible
 - Import Supabase browser client via `import { createClient } from '@/lib/supabase/client'`
 - Import Supabase server client via `import { createClient } from '@/lib/supabase/server'`
 - Import types via `import type { Plant } from '@/lib/types'`
+- Import primitives via `import { BigTitle, SectionLabel, Chip, StatusPip, HairlineButton } from '@/components/ui'`
 - Keep pages in `app/`, reusable components in `components/`, shared logic in `lib/`
 - Never put API keys or secrets in app code — use `.env.local` and Supabase Edge Functions
 - Use `npm install` for all packages (no Expo-specific install commands)

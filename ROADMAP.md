@@ -250,6 +250,51 @@ These matter once users have 10+ plants and have been using the app daily for we
 
 ---
 
+## Phase 14 — Editorial Redesign ✅
+**Decision (2026-04-18):** full visual + UX overhaul to move the app out of "generic green app"
+territory and into a field-guide journal aesthetic. Delivered option 2 of the design handoff scope:
+visual redesign + new Today home, no schema changes. See "Editorial Design System" in CLAUDE.md
+for the tokens, fonts, icon set, and primitives.
+
+| Task | Status |
+|---|---|
+| Editorial palette tokens in `tailwind.config.ts` (paper/ink/accent/warn/danger) | ✅ |
+| Google Fonts: Source Serif 4 + Inter + JetBrains Mono | ✅ |
+| `components/Icon.tsx` — 39 single-stroke SVGs replacing every emoji in the UI | ✅ |
+| `components/ui.tsx` — BigTitle, SectionLabel, Chip, StatusPip, HairlineButton | ✅ |
+| `components/BottomNav.tsx` — floating pill: Today / Plants / Explore / Me | ✅ |
+| `components/PlantPhoto.tsx` — deterministic warm blocky placeholder | ✅ |
+| **New Today home** — task list (overdue/due-soon), streak strip, collection strip, journal peek from latest analysis | ✅ |
+| **New Plants route** `/plants` — grid/list toggle, group by all/location/status | ✅ |
+| **Plant Detail** — ditched 3-tab layout; single-scroll editorial layout with hero, status strip, AI diagnosis card, log book, dossier, schedule, species guide, photo strip, floating care dock | ✅ |
+| **Add Plant** — 3-step wizard (identify → place → schedule); wires AI identification at step 1 | ✅ |
+| **Explore** — category grid, featured carousel, recently-viewed (localStorage), redesigned species detail | ✅ |
+| **Me** — identity card, sign out, about | ✅ |
+| Build passes + browser test pass on desktop viewport | ✅ |
+
+**Excluded from Phase 14 (per scope option 2):**
+- Rooms schema (uses existing `plants.location` field as a soft room substitute)
+- AI Journal table + edge function (journal peek uses most recent `analysis_results.health` text)
+- Auth page restyling (sign-in / sign-up still use the old brand-green look, but still compile because `brand` token now maps to accent)
+
+---
+
+### Phase 14A — Redesign Polish ⬜
+Punch list from browser testing on 2026-04-18. None are blocking, but all should ship together.
+
+| Task | Status | Notes |
+|---|---|---|
+| Hide bottom nav on `/plant/[id]` so it doesn't stack with the care dock | ⬜ | Or replace nav position with the dock entirely when on a plant detail |
+| Hide bottom nav on `/add-plant` (it's a modal-style wizard) | ⬜ | Close button is the only exit |
+| Cap Add Plant dropzone height (e.g. `max-h-[60vh]`) so the Continue button stays visible without scrolling | ⬜ | Also pin footer sticky |
+| Fix Add Plant header: close button (×) overlaps the progress bar | ⬜ | Tighten header `pb` or push progress bar down |
+| Species guide quick-rows on Plant Detail: truncate to first sentence/bullet; full content only when expanded | ⬜ | Current rows show raw `• Requires 12–16 hours…` bullets inline because the AI returns paragraphs not one-liners |
+| Status strip "Activity: 0" on a brand-new plant renders in danger red — too harsh | ⬜ | Give 0 logs a neutral tone for new plants |
+| Mobile pass: test on actual phone (or Chrome DevTools iPhone 14 Pro) — `resize_window` couldn't narrow the browser during Claude-driven testing | ⬜ | Watch for: dock/nav overlap, tap targets at 390px, iOS safe-area insets, scroll anchoring on Plant Detail |
+| Restyle `(auth)` pages in the Editorial palette | ⬜ | Currently still uses legacy brand-green-ish look via the compatibility mapping |
+
+---
+
 ## Notes & Decisions Log
 - **2026-03-26** — Tech stack chosen: Expo + Supabase + Anthropic Claude API
 - **2026-03-26** — Developer is on Mac, testing on Android
@@ -273,6 +318,9 @@ These matter once users have 10+ plants and have been using the app daily for we
 - **2026-04-03** — All critical phases complete (M1–M9, 11D, 11E). App is ready to share with real users. Next: Phase 12 depth features.
 - **2026-04-03** — Phase 11F complete: Plant Encyclopedia (Explore tab). Text search uses new `suggest-species` Edge Function to show a disambiguation grid with Wikipedia thumbnails before loading a profile. Photo search identifies species directly via `identify-species` Edge Function. Species profiles now use bullet-formatted content via `FormattedContent` renderer. Two new profile sections: Pruning Tips and Disease & Symptoms. `pruning_tips` and `disease_symptoms` columns added to `species_profiles` table.
 - **2026-04-03** — Search disambiguation design decision: text search always shows a 2-col suggestion grid first (even for unambiguous queries) so users can confirm the match before the AI fetches a full profile. Photo search goes directly to profile — the photo already identifies the specific plant, so disambiguation isn't needed.
+- **2026-04-18** — **Phase 14 complete: Editorial Botanical redesign.** Full visual + UX overhaul delivered from a Claude Design handoff bundle. Every `/(app)` screen rewritten; home replaced with a Today task list; Plant Detail moved from 3 tabs to a single editorial scroll; Add Plant became a 3-step wizard; Explore became a field-guide library; new "Me" tab. New design tokens (paper/ink/olive accent), Source Serif 4 + Inter + JetBrains Mono fonts, 39-icon single-stroke SVG set replacing all emoji. All existing data/logic preserved — zero schema changes. Legacy `brand` Tailwind token kept as compatibility shim.
+- **2026-04-18** — Scope decision for Phase 14: went with "option 2" of the design — visual redesign + new Today home, but deferred Rooms schema changes and AI Journal table/edge function. Journal peek on Today uses the most recent `analysis_results.health` text as a stand-in.
+- **2026-04-18** — Browser test completed on desktop viewport using Claude in Chrome. Real user data flows through every screen; no console errors. Five polish items found, tracked as Phase 14A. `resize_window` through the Chrome extension didn't narrow the window to phone width, so mobile-specific behaviors (dock/nav overlap, tap targets, safe-area insets) were NOT verified end-to-end — user needs to test on their phone or DevTools device mode.
 
 ---
 

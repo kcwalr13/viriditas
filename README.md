@@ -56,20 +56,27 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ```
 app/
-  (auth)/          # Sign in and sign up pages (unauthenticated)
-  (app)/           # All authenticated screens
-    page.tsx       # My Plants (home screen)
-    add-plant/     # Add Plant form
-    plant/[id]/    # Plant Detail screen
-    settings/      # Settings
+  (auth)/             # Sign in and sign up pages (unauthenticated)
+  (app)/              # All authenticated screens — shared BottomNav
+    page.tsx          # Today — task list, streak, collection strip, journal peek (home)
+    plants/           # Plants collection (grid/list, groupings)
+    plant/[id]/       # Plant Detail (single-scroll editorial layout)
+    add-plant/        # Add Plant (3-step wizard)
+    explore/          # Field Guide — categories, featured, search, species detail
+    settings/         # Me — identity, sign out, about
+components/
+  Icon.tsx            # 39 single-stroke SVG icons (replaces emoji)
+  ui.tsx              # BigTitle, SectionLabel, Chip, StatusPip, HairlineButton
+  BottomNav.tsx       # Floating pill: Today / Plants / Explore / Me
+  PlantPhoto.tsx      # Warm blocky placeholder when no cover photo
 lib/
-  supabase/        # Supabase client (browser + server)
-  types.ts         # Shared TypeScript types
-  utils.ts         # Utility functions
+  supabase/           # Supabase client (browser + server)
+  types.ts            # Shared TypeScript types
+  utils.ts            # Date, watering status, care streak helpers
 supabase/
-  functions/       # Edge Functions (AI analysis, species info)
-public/            # Static assets, PWA manifest, icons
-middleware.ts      # Auth guard for all /(app) routes
+  functions/          # Edge Functions (AI analysis, species info, identify, suggest)
+public/               # Static assets, PWA manifest, icons
+middleware.ts         # Auth guard for all /(app) routes
 ```
 
 ---

@@ -2,26 +2,38 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Fonts — Source Serif 4 (display), Inter (UI), JetBrains Mono (metadata).
+   Loaded from Google Fonts; preconnected in app/layout.tsx. */
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400;1,8..60,500&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
 /* Remove default iOS/Android tap highlight on mobile */
 * {
   -webkit-tap-highlight-color: transparent;
+  box-sizing: border-box;
 }
 
-/* Smooth scrolling */
-html {
-  scroll-behavior: smooth;
-}
+html { scroll-behavior: smooth; }
 
-/* Make the app feel full-height on mobile browsers */
 body {
   min-height: 100dvh;
+  background: #F4EFE6;       /* paper */
+  color: #1F2A24;            /* ink */
+  font-family: 'Inter', -apple-system, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
+
+/* Hide scrollbars on horizontal scroll rails while keeping them scrollable. */
+.vr-scroll::-webkit-scrollbar { display: none; }
+.vr-scroll { scrollbar-width: none; }
+
+/* Subtle button press feedback */
+button:active { transform: scale(0.98); transition: transform 80ms ease; }
+button:focus, input:focus, textarea:focus { outline: none; }
 
 /* Toast notification — slides up and fades in */
 @keyframes toastIn {
   from { opacity: 0; transform: translateX(-50%) translateY(6px); }
   to   { opacity: 1; transform: translateX(-50%) translateY(0);   }
 }
-.toast-enter {
-  animation: toastIn 0.18s ease-out forwards;
-}
+.toast-enter { animation: toastIn 0.18s ease-out forwards; }

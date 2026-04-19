@@ -222,6 +222,9 @@ Floating pill with four tabs: **Today / Plants / Explore / Me**. Active tab show
 
 `care_logs`
 - id, plant_id, user_id, type (CHECK constraint — see below), notes (nullable), logged_at
+- **category** (nullable, CHECK constraint) — only set on `note` rows; one of `growth`, `pest`, `environment`, `concern`, `general`. Legacy notes carry NULL and render without a badge. (Phase 15 — Gap 4)
+- **measurement_value** (nullable numeric) — only set on `measured` rows; structured numeric value for trend tracking. (Phase 15 — Gap 6)
+- **measurement_unit** (nullable, CHECK constraint) — pairs with `measurement_value`; one of `cm`, `in`, `mm`, `ft`, `leaves`, `stems`, `flowers`, `pups`. Short allowlist keeps AI trend comparison reliable.
 
 `analysis_results`
 - id, plant_id, user_id, photo_id (nullable), species (nullable)
@@ -298,6 +301,16 @@ ALTER TABLE care_logs ADD CONSTRAINT care_logs_type_check CHECK (type IN (...all
 - Requires Edge Function redeploy after changing
 - Current: `claude` using `claude-haiku-4-5-20251001`
 - Base64 encoding in Edge Functions: use Deno's std library (`import { encode as encodeBase64 } from 'https://deno.land/std@0.168.0/encoding/base64.ts'`)
+
+### Analyze-Plant Context (Phase 15 — Gaps 1, 2, 3, 5)
+The `analyze-plant` Edge Function receives rich context so the AI can deliver plant-specific advice instead of generic species guidance:
+- **Species profile**: full row including `pruning_tips`, `disease_symptoms`, `seasonal_care` (not just light/water/temp). Disease symptoms are especially valuable — they let the AI cross-reference what it sees in the photo against known issue signatures for that species.
+- **Plant context**: `location`, `pot_size`, `soil_type`, plus `plant_notes` (owner's freeform notes), `pest_notes` (pest history), `last_treatment_date`. Pest history is consequential — recurring infestations get treated very differently from first occurrences.
+- **Previous analyses**: includes `health_score` (1–5 trend) and `care` (prior recommendations). The AI is instructed to comment on whether scores are improving/declining and whether the owner appears to have followed previous recommendations.
+- **Recent care logs**: each entry can include `category` (for `note` rows) and `measurement_value`/`measurement_unit` (for `measured` rows). The AI uses categorized notes to understand what the owner was focused on, and measurements to assess growth rate.
+- **Season context**: month + hemisphere (currently hardcoded to `northern`).
+
+When adding a new field to one of these context types, update three places: the call-site payload in [`plant/[id]/page.tsx`](app/(app)/plant/[id]/page.tsx) `handleAnalyze`, the type definition in `analyze-plant/index.ts`, and the prompt-builder section that consumes it.
 
 ### Date Handling
 - Always use `<input type="date">` for date fields — gives the browser's native date picker

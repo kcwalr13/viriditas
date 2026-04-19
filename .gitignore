@@ -30,8 +30,14 @@ yarn-error.*
 .DS_Store
 *.pem
 
+# Next.js build output
+.next/
+next-env.d.ts
+
 # local env files
 .env*.local
+.env
+.env.production
 
 # typescript
 *.tsbuildinfo

@@ -1,5 +1,5 @@
 # Viriditas — Current State & Priorities
-_Last updated: 2026-04-19 after session wrap-up_
+_Last updated: 2026-04-19 after P1/P2 backlog session_
 
 ---
 
@@ -103,39 +103,29 @@ The app is fully functional end-to-end. Users can add plants (photo or name), tr
 
 ## Known Gaps & Rough Edges
 
-### P1 — Should fix soon
+### P1 — Should fix soon ✅ All resolved 2026-04-19
 
-**Photo deletion not implemented**
-When a plant is deleted, the row cascade removes `photos` table entries, but the underlying files in Supabase Storage at `{userId}/{plantId}/…` are orphaned. Need a Supabase database trigger or an Edge Function called on plant delete to clean up storage.
+~~**Photo deletion not implemented**~~ → **Fixed.** `handleDelete` now lists and removes all files from `plant-photos/{userId}/{plantId}/` before deleting the plant row.
 
-**Log book only shows items with no real pagination**
-The timeline in Plant Detail shows 8 items with a "show all" toggle — but "show all" loads the full in-memory list. Heavy users would need server-side pagination for the full history to be practical.
+~~**Log book only shows items with no real pagination**~~ → **Fixed.** Log book now uses server-side `.range(0, 19)` with a "Load more · N remaining" button. `totalCareLogs` count tracked separately.
 
-**Species profile cache not invalidated on name correction**
-If the AI identifies "Monstera sp." and the user later corrects to "Monstera deliciosa" in the edit form, the species guide fetches for the corrected name — but the old "Monstera sp." profile remains in `species_profiles` forever. Minor storage leak; not a user-facing bug.
+~~**Species profile cache not invalidated on name correction**~~ → **Fixed.** When the user saves an edited species name in the edit form, `speciesProfile` state is cleared so the profile is re-fetched for the corrected name. `is_name_verified?: boolean` added to `Plant` type for future DB-level tracking (migration pending — see SQL block below).
 
-**No confirmation before triggering re-analyze**
-The "Re-analyze" button in Plant Detail triggers an AI call immediately with no "are you sure?" gate. For cost management, a debounce or rate-limit feedback would be useful.
+~~**No confirmation before triggering re-analyze**~~ → **Fixed.** `handleAnalyzeClick()` wrapper shows `window.confirm` and sets a 3s `analyzeGated` cooldown. All three analyze button call-sites updated.
 
-**Password reset flow**
-No "forgot password" link on sign-in. Supabase supports this via `supabase.auth.resetPasswordForEmail()`; just needs the UI.
+~~**Password reset flow**~~ → **Fixed.** `/forgot-password` page sends reset email via `resetPasswordForEmail`. `/auth?mode=reset` page exchanges the PKCE code and lets the user set a new password. "Forgot password?" link added to sign-in.
 
-### P2 — Nice to have
+### P2 — Nice to have ✅ All resolved 2026-04-19
 
-**Category grid and Featured carousel are static placeholders**
-`CATEGORIES` and `FEATURED` in `explore/page.tsx` are hardcoded arrays. They work as browse entry points but the counts ("24 species") are fake. Real implementation would either: (a) query the `species_profiles` DB for real stats, or (b) keep them as curated editorial content (simpler, fine for MVP).
+~~**Category grid and Featured carousel are static placeholders**~~ → **Improved.** Categories renamed to botanically accurate terms (Tropical, Succulents & Cacti, Ferns & Mosses, Trailing vines, Flowering, Low light). Each card now shows a real count from `species_profiles` (matching on keyword ilike). Click triggers `suggest-species` search with a refined `searchQuery` field (not just the display name).
 
-**No "Add note" shortcut from Today screen**
-The Today task rows deep-link to `#quick-actions` but the anchor scroll doesn't always land at the dock. A direct "mark watered" tap from the Today screen (without navigating away) would feel faster.
+~~**No "Add note" shortcut from Today screen**~~ → **Fixed.** "+ Note" action added to the "Your collection" section header. Tapping opens a bottom sheet with plant picker (dropdown of all user plants), note textarea, optional category chips (growth/pest/environment/concern/general), and a "Save note" button.
 
-**Streak strip is not tappable**
-The streak strip on Today has a `chev` icon suggesting interactivity, but `onClick` is not wired. It should navigate to a streak history view, or the chevron should be removed.
+~~**Streak strip is not tappable**~~ → **Fixed.** Streak strip `<Link>` target changed from `/plants` to `/settings` (Me screen), which is the right destination for personal stats until a dedicated streak history view exists.
 
-**Add Plant Step 1 "Search by name" has no autocomplete**
-Users who type a name manually get no suggest-species hints. Wiring the manual input to `suggest-species` would close the gap between photo-based and name-based onboarding.
+~~**Add Plant Step 1 "Search by name" has no autocomplete**~~ → **Fixed.** Manual species input now has a debounced (300ms) autocomplete that queries `species_profiles.species_name ilike %query%` as the user types. Matching cached species names appear in a dropdown; tapping one fills the input.
 
-**Bulk care logging**
-"Water all overdue plants" from the Today screen. High-value for multi-plant users; can be a Today-screen button that batches inserts.
+~~**Bulk care logging**~~ → **Already implemented** (from previous session). "Water all · N" and "Feed all · N" bulk buttons appear on the Today screen when ≥2 plants are overdue.
 
 ### P3 — Future features (design decision needed)
 
@@ -153,17 +143,24 @@ Users who type a name manually get no suggest-species hints. Wiring the manual i
 
 ## Suggested Next Priorities
 
-1. **Password reset** — a small form, important for production readiness. Use `supabase.auth.resetPasswordForEmail()`.
-2. **Storage cleanup on plant delete** — prevents orphaned files accumulating over time.
-3. **Streak strip tap target** — remove the chevron or link it somewhere meaningful.
-4. **"Water all overdue" quick action** — high-value for multi-plant users; can be a Today-screen button that batches inserts.
-5. **Log book pagination** — server-side paginated timeline for heavy users.
-6. **Plant name search in collection** — client-side filter in the Plants collection header.
-7. **Add Plant Step 1 autocomplete** — wire the manual name input to `suggest-species`.
+1. **Plant name search in collection** — client-side filter in the Plants collection header.
+2. **Photo management** — delete individual photos, designate cover photo, reorder.
+3. **is_name_verified migration** — run `ALTER TABLE plants ADD COLUMN IF NOT EXISTS is_name_verified boolean DEFAULT false;` on Supabase, then wire it to the edit save handler for DB-level tracking.
+4. **Individual photo delete** — currently no way to delete a specific photo from the photo strip.
+5. **Push notifications** — service worker + VAPID + subscription management flow. Significant scope; post-MVP.
 
 ---
 
 ## SQL Migrations Needed
+
+> **P1/P2 session (2026-04-19) — new migration:**
+> ```sql
+> -- is_name_verified: set true when user manually edits species name in edit form.
+> -- Enables future DB-level cache invalidation logic.
+> ALTER TABLE plants ADD COLUMN IF NOT EXISTS is_name_verified boolean DEFAULT false;
+> ```
+
+
 
 The following columns exist in the running DB and are reflected in `lib/types.ts`. If setting up a fresh Supabase project, run these migrations:
 
@@ -237,3 +234,26 @@ CREATE INDEX IF NOT EXISTS idx_care_logs_plant_category
 
 **Production:** https://viriditas-three.vercel.app/
 **Test account:** uitester@viriditas.dev / Viriditas2026!
+
+---
+
+## Session Summary — 2026-04-19 (P1/P2 Backlog)
+
+**P1 — All 5 items resolved:**
+- Password reset flow: `/forgot-password` + `/auth?mode=reset` pages, "Forgot password?" link on sign-in
+- Storage cleanup on plant delete: lists and removes all storage files before deleting the plant row
+- Re-analyze confirmation gate: `window.confirm` + 3s debounce prevents accidental AI credit spend
+- Species cache invalidation: clearing `speciesProfile` state on manual species name edit
+- Log book pagination: server-side `.range()` with "Load more · N remaining" button
+
+**P2 — All 5 items resolved (P2-6 was already done):**
+- Quick "Add note" from Today: bottom sheet with plant picker, note textarea, category chips
+- Streak strip chevron: now links to `/settings` (Me screen) rather than `/plants`
+- Add Plant autocomplete: debounced `species_profiles` ilike search with inline dropdown
+- Explore category grid: better category names, real cached-species counts, accurate search queries
+- Bulk water-all: already implemented (verified unchanged)
+
+**SQL migration to run on Supabase:**
+```sql
+ALTER TABLE plants ADD COLUMN IF NOT EXISTS is_name_verified boolean DEFAULT false;
+```

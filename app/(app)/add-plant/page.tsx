@@ -38,6 +38,9 @@ export default function AddPlantPage() {
   const [manualSpecies, setManualSpecies] = useState('')
   const [manualSpeciesOpen, setManualSpeciesOpen] = useState(false)
   const [manualSpeciesSuggestions, setManualSpeciesSuggestions] = useState<string[]>([])
+  // Stored after Step 1 identification — forwarded to nickname generator
+  const [photoBase64, setPhotoBase64] = useState<string | null>(null)
+  const [photoMimeType, setPhotoMimeType] = useState<string>('')
 
   // Step 2 state
   const [nickname, setNickname] = useState('')
@@ -49,6 +52,10 @@ export default function AddPlantPage() {
   // Step 3 state — null means "no schedule" (skip)
   const [interval, setInterval] = useState<number | null>(7)
   const [fertilizingInterval, setFertilizingInterval] = useState<number | null>(null)
+  // AI-suggested intervals — stored separately so Step 3 can show a "✨ AI suggested" label
+  const [aiWateringDays, setAiWateringDays] = useState<number | null>(null)
+  const [aiFeedingDays, setAiFeedingDays]   = useState<number | null>(null)
+  const [intervalsAiPopulated, setIntervalsAiPopulated] = useState(false)
 
   // Submit state
   const [submitting, setSubmitting] = useState(false)
@@ -117,6 +124,8 @@ export default function AddPlantPage() {
     setError(null)
     try {
       const base64 = await fileToBase64(file)
+      setPhotoBase64(base64)
+      setPhotoMimeType(file.type)
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) throw new Error('Not logged in')
 
@@ -133,6 +142,18 @@ export default function AddPlantPage() {
       setError(err instanceof Error ? err.message : 'Could not identify species.')
     } finally {
       setIdentifying(false)
+    }
+  }
+
+  // Called by Step2 after auto-fetching the AI suggestions endpoint
+  function handleCareSchedule(wateringDays: number | null, feedingDays: number | null) {
+    setAiWateringDays(wateringDays)
+    setAiFeedingDays(feedingDays)
+    // Only pre-fill the schedule once (don't clobber manual changes if user navigates back)
+    if (!intervalsAiPopulated) {
+      if (wateringDays !== null) setInterval(wateringDays)
+      if (feedingDays  !== null) setFertilizingInterval(feedingDays)
+      setIntervalsAiPopulated(true)
     }
   }
 
@@ -235,7 +256,7 @@ export default function AddPlantPage() {
             result={identifyResult}
             speciesConfirmed={speciesConfirmed}
             onConfirm={() => setSpeciesConfirmed(true)}
-            onReset={() => { setPhotoPreview(null); setPhotoFile(null); setIdentifyResult(null); setSpeciesConfirmed(false) }}
+            onReset={() => { setPhotoPreview(null); setPhotoFile(null); setIdentifyResult(null); setSpeciesConfirmed(false); setPhotoBase64(null); setPhotoMimeType('') }}
             onTakePhoto={() => fileInputRef.current?.click()}
             manualSpeciesOpen={manualSpeciesOpen}
             manualSpecies={manualSpecies}
@@ -253,6 +274,10 @@ export default function AddPlantPage() {
             soilType={soilType} setSoilType={setSoilType}
             acquiredDate={acquiredDate} setAcquiredDate={setAcquiredDate}
             presets={locationPresets}
+            speciesName={identifyResult?.speciesName || manualSpecies.trim()}
+            imageBase64={photoBase64 ?? undefined}
+            imageMimeType={photoMimeType || undefined}
+            onCareSchedule={handleCareSchedule}
           />
         )}
         {step === 3 && (
@@ -260,6 +285,8 @@ export default function AddPlantPage() {
             interval={interval} setInterval={setInterval}
             fertilizingInterval={fertilizingInterval} setFertilizingInterval={setFertilizingInterval}
             nickname={nickname}
+            aiWateringDays={aiWateringDays}
+            aiFeedingDays={aiFeedingDays}
           />
         )}
 
@@ -443,6 +470,10 @@ function Step2({
   soilType, setSoilType,
   acquiredDate, setAcquiredDate,
   presets,
+  speciesName,
+  imageBase64,
+  imageMimeType,
+  onCareSchedule,
 }: {
   nickname: string; setNickname: (s: string) => void
   location: string; setLocation: (s: string) => void
@@ -450,7 +481,50 @@ function Step2({
   soilType: string; setSoilType: (s: string) => void
   acquiredDate: string; setAcquiredDate: (s: string) => void
   presets: string[]
+  speciesName: string
+  imageBase64?: string
+  imageMimeType?: string
+  onCareSchedule: (wateringDays: number | null, feedingDays: number | null) => void
 }) {
+  const [suggestions, setSuggestions] = useState<string[]>([])
+  const [loadingSugg, setLoadingSugg] = useState(false)
+  const [suggFailed, setSuggFailed] = useState(false)
+
+  // Auto-fetch on mount when a species is known — generates nicknames + care schedule in one shot
+  useEffect(() => {
+    if (speciesName) fetchSuggestions()
+  }, [speciesName]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function fetchSuggestions() {
+    setLoadingSugg(true)
+    setSuggFailed(false)
+    setSuggestions([])
+    try {
+      const res = await fetch('/api/suggest-nickname', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          speciesName,
+          imageBase64: imageBase64 || undefined,
+          mimeType: imageMimeType || undefined,
+        }),
+      })
+      const data = await res.json() as {
+        suggestions?: string[]
+        wateringDays?: number | null
+        feedingDays?: number | null
+        error?: string
+      }
+      if (!res.ok || data.error) throw new Error(data.error ?? 'Failed')
+      setSuggestions(data.suggestions ?? [])
+      onCareSchedule(data.wateringDays ?? null, data.feedingDays ?? null)
+    } catch {
+      setSuggFailed(true)
+    } finally {
+      setLoadingSugg(false)
+    }
+  }
+
   return (
     <div className="px-5 pt-2">
       <BigTitle>
@@ -461,16 +535,54 @@ function Step2({
       </p>
 
       <div className="mt-6">
-        <label className="font-mono text-[10px] tracking-[0.14em] uppercase text-ink-muted">
-          Nickname
-        </label>
+        {/* Label row — ✨ Suggest button appears when a species is known */}
+        <div className="flex items-center justify-between mb-1.5">
+          <label className="font-mono text-[10px] tracking-[0.14em] uppercase text-ink-muted">
+            Nickname
+          </label>
+          {speciesName && (
+            <button
+              type="button"
+              onClick={fetchSuggestions}
+              disabled={loadingSugg}
+              className="flex items-center gap-1 text-[11px] text-accent font-medium disabled:opacity-40"
+            >
+              {loadingSugg ? (
+                <>
+                  <span className="inline-block w-2.5 h-2.5 border border-accent border-t-transparent rounded-full animate-spin" />
+                  <span>Generating…</span>
+                </>
+              ) : (
+                <>
+                  <Icon name="sparkle" size={12} stroke={1.9} className="text-accent" />
+                  <span>{suggFailed ? 'Try again' : suggestions.length > 0 ? 'Regenerate' : 'Suggest'}</span>
+                </>
+              )}
+            </button>
+          )}
+        </div>
         <input
           value={nickname}
           onChange={e => setNickname(e.target.value)}
           placeholder="Mabel, Corner Phil, Big Fern…"
-          className="mt-1.5 w-full px-4 py-3.5 border border-rule rounded-brand bg-card font-serif italic text-[20px] text-ink"
+          className="w-full px-4 py-3.5 border border-rule rounded-brand bg-card font-serif italic text-[20px] text-ink"
           autoFocus
         />
+        {/* Suggestion chips — horizontal scroll rail */}
+        {suggestions.length > 0 && (
+          <div className="mt-2 flex gap-1.5 overflow-x-auto vr-scroll pb-0.5">
+            {suggestions.map(s => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => setNickname(s)}
+                className="shrink-0 px-3 py-1.5 rounded-full bg-accent-soft border border-rule text-[12px] text-ink font-serif italic whitespace-nowrap"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="mt-5">
@@ -533,15 +645,24 @@ function Step3({
   interval, setInterval,
   fertilizingInterval, setFertilizingInterval,
   nickname,
+  aiWateringDays,
+  aiFeedingDays,
 }: {
   interval: number | null
   setInterval: (n: number | null) => void
   fertilizingInterval: number | null
   setFertilizingInterval: (n: number | null) => void
   nickname: string
+  aiWateringDays?: number | null
+  aiFeedingDays?: number | null
 }) {
   const options = [3, 5, 7, 10, 14, 21]
   const feedOptions = [14, 21, 30, 45, 60, 90]
+
+  // True when the current value was the one the AI suggested
+  const wateringIsAiSuggested = aiWateringDays !== null && aiWateringDays !== undefined && interval === aiWateringDays
+  const feedingIsAiSuggested  = aiFeedingDays  !== null && aiFeedingDays  !== undefined && fertilizingInterval === aiFeedingDays
+
   return (
     <div className="px-5 pt-2 pb-4">
       <BigTitle>
@@ -562,6 +683,13 @@ function Step3({
             {interval}
           </div>
           <div className="font-serif text-[18px] text-ink">day{interval === 1 ? '' : 's'}</div>
+          {/* ✨ AI suggested badge */}
+          {wateringIsAiSuggested && (
+            <div className="mt-2 inline-flex items-center gap-1 text-[10px] text-accent font-mono tracking-[0.1em] uppercase">
+              <Icon name="sparkle" size={10} stroke={1.9} className="text-accent" />
+              AI suggested
+            </div>
+          )}
 
           <div className="mt-5 flex gap-1.5 flex-wrap justify-center">
             {options.map(d => (
@@ -628,8 +756,16 @@ function Step3({
         </div>
         {fertilizingInterval !== null && (
           <div className="p-4 bg-card rounded-brand border border-rule">
-            <div className="font-mono text-[10px] tracking-[0.12em] uppercase text-ink-muted mb-2.5">
-              Fertilize every
+            <div className="flex items-center gap-2 mb-2.5">
+              <div className="font-mono text-[10px] tracking-[0.12em] uppercase text-ink-muted">
+                Fertilize every
+              </div>
+              {feedingIsAiSuggested && (
+                <div className="inline-flex items-center gap-1 text-[10px] text-accent font-mono tracking-[0.1em] uppercase">
+                  <Icon name="sparkle" size={10} stroke={1.9} className="text-accent" />
+                  AI suggested
+                </div>
+              )}
             </div>
             <div className="flex gap-1.5 flex-wrap">
               {feedOptions.map(d => (

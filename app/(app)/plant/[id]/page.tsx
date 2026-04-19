@@ -1015,7 +1015,7 @@ export default function PlantDetailPage() {
               {photos.length === 0 ? 'Snap a photo to unlock AI diagnosis.' : 'Run the first analysis to get a diagnosis.'}
             </div>
             <p className="text-xs text-ink-soft mt-2">
-              Claude will spot early signs of stress and suggest next steps.
+              Viriditas will spot early signs of stress and suggest next steps.
             </p>
             {photos.length === 0 ? (
               <HairlineButton icon="camera" onClick={() => fileInputRef.current?.click()} variant="outline" fullWidth={false}>

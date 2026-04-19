@@ -10,7 +10,7 @@
 // in step 1, it's uploaded and attached to the new plant afterwards.
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { BigTitle, Chip, HairlineButton } from '@/components/ui'
 import { Icon } from '@/components/Icon'
 import { PlantPhoto } from '@/components/PlantPhoto'
@@ -41,15 +41,44 @@ export default function AddPlantPage() {
   const [nickname, setNickname] = useState('')
   const [location, setLocation] = useState('')
   const [customLocation, setCustomLocation] = useState('')
+  const [soilType, setSoilType] = useState('')
+  const [acquiredDate, setAcquiredDate] = useState('')
 
-  // Step 3 state
-  const [interval, setInterval] = useState<number>(7)
+  // Step 3 state — null means "no schedule" (skip)
+  const [interval, setInterval] = useState<number | null>(7)
+  const [fertilizingInterval, setFertilizingInterval] = useState<number | null>(null)
 
   // Submit state
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  const [locationPresets, setLocationPresets] = useState<string[]>(
+    ['Living Room', 'Bedroom', 'Bathroom', 'Kitchen', 'Office']
+  )
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Replace hardcoded location presets with the user's existing plant locations.
+  useEffect(() => {
+    async function loadLocations() {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) return
+      const { data } = await supabase.from('plants').select('location').eq('user_id', session.user.id).not('location', 'is', null)
+      const locs = [...new Set((data ?? []).map(p => p.location as string).filter(Boolean))]
+      if (locs.length > 0) setLocationPresets(locs)
+    }
+    loadLocations()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // If ?species=... was passed (e.g. from Explore "I have one"), skip to step 2.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const pre = params.get('species')
+    if (pre) {
+      setManualSpecies(pre)
+      setManualSpeciesOpen(true)
+      setStep(2)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Step 1: photo + identify ──────────────────────────────────────────
   async function handlePhotoSelected(e: React.ChangeEvent<HTMLInputElement>) {
@@ -115,7 +144,10 @@ export default function AddPlantPage() {
           nickname: nickname.trim(),
           species: finalSpecies,
           location: finalLocation,
+          soil_type: soilType.trim() || null,
+          acquired_date: acquiredDate || null,
           watering_interval_days: interval,
+          fertilizing_interval_days: fertilizingInterval,
         })
         .select()
         .single()
@@ -146,12 +178,8 @@ export default function AddPlantPage() {
     }
   }
 
-  // Previously-entered locations pulled from their plants list would be
-  // nicer UX, but keeping it simple: offer four sensible defaults + "Other".
-  const LOCATION_PRESETS = ['Living Room', 'Bedroom', 'Bathroom', 'Kitchen', 'Office']
-
   return (
-    <div className="min-h-screen flex flex-col bg-paper">
+    <div className="h-screen flex flex-col bg-paper">
       {/* ── Header ──────────────────────────────────────────────────── */}
       <div className="px-4 pt-3 pb-4 flex items-center justify-between">
         <button
@@ -168,7 +196,7 @@ export default function AddPlantPage() {
       </div>
 
       {/* ── Progress ─────────────────────────────────────────────────── */}
-      <div className="px-5 pb-3 flex gap-1.5">
+      <div className="px-5 pt-2 pb-3 flex gap-1.5">
         {[1, 2, 3].map(n => (
           <div
             key={n}
@@ -200,12 +228,15 @@ export default function AddPlantPage() {
             nickname={nickname} setNickname={setNickname}
             location={location} setLocation={setLocation}
             customLocation={customLocation} setCustomLocation={setCustomLocation}
-            presets={LOCATION_PRESETS}
+            soilType={soilType} setSoilType={setSoilType}
+            acquiredDate={acquiredDate} setAcquiredDate={setAcquiredDate}
+            presets={locationPresets}
           />
         )}
         {step === 3 && (
           <Step3
             interval={interval} setInterval={setInterval}
+            fertilizingInterval={fertilizingInterval} setFertilizingInterval={setFertilizingInterval}
             nickname={nickname}
           />
         )}
@@ -276,9 +307,8 @@ function Step1({
       {/* Photo dropzone */}
       <button
         onClick={onTakePhoto}
-        className="w-full mt-5 relative overflow-hidden rounded-brand-lg flex items-center justify-center border"
+        className="w-full mt-5 relative overflow-hidden rounded-brand-lg flex items-center justify-center border min-h-[200px] max-h-[45vh]"
         style={{
-          aspectRatio: '1 / 1',
           borderStyle: 'dashed',
           borderColor: photoPreview ? '#4C6A48' : '#D9D0BD',
           background: photoPreview ? 'transparent' : '#EDE6D7',
@@ -370,11 +400,15 @@ function Step2({
   nickname, setNickname,
   location, setLocation,
   customLocation, setCustomLocation,
+  soilType, setSoilType,
+  acquiredDate, setAcquiredDate,
   presets,
 }: {
   nickname: string; setNickname: (s: string) => void
   location: string; setLocation: (s: string) => void
   customLocation: string; setCustomLocation: (s: string) => void
+  soilType: string; setSoilType: (s: string) => void
+  acquiredDate: string; setAcquiredDate: (s: string) => void
   presets: string[]
 }) {
   return (
@@ -422,53 +456,150 @@ function Step2({
           />
         )}
       </div>
+
+      <div className="mt-5">
+        <label className="font-mono text-[10px] tracking-[0.14em] uppercase text-ink-muted">
+          Soil type <span className="normal-case tracking-normal text-ink-muted/60">(optional)</span>
+        </label>
+        <input
+          value={soilType}
+          onChange={e => setSoilType(e.target.value)}
+          placeholder="e.g. Aroid mix, peat-based, succulent mix…"
+          className="mt-1.5 w-full px-3.5 py-3 border border-rule rounded-brand bg-card text-[14px] text-ink"
+        />
+        <p className="mt-1.5 text-[11px] text-ink-muted">
+          Soil type affects watering frequency — the AI uses it to give more accurate advice.
+        </p>
+      </div>
+
+      <div className="mt-5">
+        <label className="font-mono text-[10px] tracking-[0.14em] uppercase text-ink-muted">
+          When did you get it? <span className="normal-case tracking-normal text-ink-muted/60">(optional)</span>
+        </label>
+        <input
+          type="date"
+          value={acquiredDate}
+          onChange={e => setAcquiredDate(e.target.value)}
+          max={new Date().toISOString().split('T')[0]}
+          className="mt-1.5 w-full px-3.5 py-3 border border-rule rounded-brand bg-card text-[14px] text-ink"
+        />
+      </div>
     </div>
   )
 }
 
 // ─── Step 3: schedule ───────────────────────────────────────────────────
 function Step3({
-  interval, setInterval, nickname,
+  interval, setInterval,
+  fertilizingInterval, setFertilizingInterval,
+  nickname,
 }: {
-  interval: number
-  setInterval: (n: number) => void
+  interval: number | null
+  setInterval: (n: number | null) => void
+  fertilizingInterval: number | null
+  setFertilizingInterval: (n: number | null) => void
   nickname: string
 }) {
   const options = [3, 5, 7, 10, 14, 21]
+  const feedOptions = [14, 21, 30, 45, 60, 90]
   return (
     <div className="px-5 pt-2 pb-4">
       <BigTitle>
         When should we <span className="italic text-accent">remind you?</span>
       </BigTitle>
       <p className="text-sm text-ink-soft mt-2 leading-relaxed">
-        We&rsquo;ll suggest watering {nickname || 'your plant'} every {interval} days. You
-        can always adjust.
+        {interval
+          ? `We'll suggest watering ${nickname || 'your plant'} every ${interval} days. You can always adjust.`
+          : `No watering reminder — you can set one any time from the plant detail screen.`}
       </p>
 
-      <div className="mt-6 p-5 bg-card rounded-brand-lg border border-rule text-center">
-        <div className="font-mono text-[10px] tracking-[0.14em] uppercase text-ink-muted">
-          Water every
-        </div>
-        <div className="font-serif italic text-accent leading-none mt-1" style={{ fontSize: 80 }}>
-          {interval}
-        </div>
-        <div className="font-serif text-[18px] text-ink">day{interval === 1 ? '' : 's'}</div>
+      {interval !== null ? (
+        <div className="mt-6 p-5 bg-card rounded-brand-lg border border-rule text-center">
+          <div className="font-mono text-[10px] tracking-[0.14em] uppercase text-ink-muted">
+            Water every
+          </div>
+          <div className="font-serif italic text-accent leading-none mt-1" style={{ fontSize: 80 }}>
+            {interval}
+          </div>
+          <div className="font-serif text-[18px] text-ink">day{interval === 1 ? '' : 's'}</div>
 
-        <div className="mt-5 flex gap-1.5 flex-wrap justify-center">
-          {options.map(d => (
-            <Chip key={d} active={interval === d} onClick={() => setInterval(d)}>
-              {d}d
-            </Chip>
-          ))}
+          <div className="mt-5 flex gap-1.5 flex-wrap justify-center">
+            {options.map(d => (
+              <Chip key={d} active={interval === d} onClick={() => setInterval(d)}>
+                {d}d
+              </Chip>
+            ))}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="mt-6 p-5 bg-paper-alt rounded-brand-lg border border-dashed border-rule text-center">
+          <Icon name="calendar" size={24} stroke={1.6} className="text-ink-muted mx-auto" />
+          <div className="font-serif italic text-[17px] text-ink mt-2">No schedule</div>
+          <div className="text-xs text-ink-muted mt-1">You can set a reminder from the plant detail screen at any time.</div>
+          <button
+            onClick={() => setInterval(7)}
+            className="mt-4 text-[12px] text-accent font-medium"
+          >
+            Set a reminder instead
+          </button>
+        </div>
+      )}
 
-      <div className="mt-3.5 p-3 flex gap-2.5 bg-paper-alt border border-rule rounded-brand">
-        <Icon name="sparkle" size={16} stroke={1.9} className="text-accent shrink-0" />
-        <p className="text-xs text-ink-soft leading-relaxed">
-          You can change this anytime from the plant detail screen. The watering
-          status badge on the home screen updates automatically.
-        </p>
+      {interval !== null && (
+        <>
+          <div className="mt-3.5 p-3 flex gap-2.5 bg-paper-alt border border-rule rounded-brand">
+            <Icon name="sparkle" size={16} stroke={1.9} className="text-accent shrink-0" />
+            <p className="text-xs text-ink-soft leading-relaxed">
+              You can change this anytime from the plant detail screen. The watering
+              status badge on the home screen updates automatically.
+            </p>
+          </div>
+          <button
+            onClick={() => setInterval(null)}
+            className="mt-4 w-full text-center text-[12px] text-ink-muted font-medium"
+          >
+            Skip for now — I&rsquo;ll set a reminder later
+          </button>
+        </>
+      )}
+
+      {/* ── Fertilizing schedule ── */}
+      <div className="mt-6 pt-5 border-t border-rule">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <div className="font-mono text-[10px] tracking-[0.14em] uppercase text-ink-muted">Fertilizing</div>
+            <div className="text-[13px] text-ink-soft mt-0.5">Optional — how often to feed?</div>
+          </div>
+          {fertilizingInterval === null ? (
+            <button
+              onClick={() => setFertilizingInterval(30)}
+              className="text-[12px] text-accent font-medium"
+            >
+              Set schedule
+            </button>
+          ) : (
+            <button
+              onClick={() => setFertilizingInterval(null)}
+              className="text-[12px] text-ink-muted font-medium"
+            >
+              Skip
+            </button>
+          )}
+        </div>
+        {fertilizingInterval !== null && (
+          <div className="p-4 bg-card rounded-brand border border-rule">
+            <div className="font-mono text-[10px] tracking-[0.12em] uppercase text-ink-muted mb-2.5">
+              Fertilize every
+            </div>
+            <div className="flex gap-1.5 flex-wrap">
+              {feedOptions.map(d => (
+                <Chip key={d} active={fertilizingInterval === d} onClick={() => setFertilizingInterval(d)}>
+                  {d}d
+                </Chip>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Small visual ghost so the screen doesn't feel empty while scrolling. */}

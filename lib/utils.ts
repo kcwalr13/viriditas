@@ -37,6 +37,20 @@ export function formatTimestamp(iso: string): string {
   })
 }
 
+// Returns a human-friendly relative time string: "today", "yesterday", "3 days ago",
+// "2 weeks ago", "3 months ago". Falls back to a formatted date for very old timestamps.
+export function relativeTime(iso: string): string {
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000)
+  if (days === 0) return 'today'
+  if (days === 1) return 'yesterday'
+  if (days < 14) return `${days} days ago`
+  const weeks = Math.round(days / 7)
+  if (weeks < 8) return `${weeks} week${weeks === 1 ? '' : 's'} ago`
+  const months = Math.round(days / 30.44)
+  if (months < 24) return `${months} month${months === 1 ? '' : 's'} ago`
+  return formatTimestamp(iso)
+}
+
 // ── Watering status ──────────────────────────────────────────────────────────
 
 export type WateringStatus = 'overdue' | 'due-soon' | 'good' | 'unset'
@@ -102,6 +116,20 @@ export function computeStreak(logTimestamps: string[]): number {
   return streak
 }
 
+// Computes the maximum consecutive-day streak across all log history (not just current).
+export function computeMaxStreak(logTimestamps: string[]): number {
+  if (logTimestamps.length === 0) return 0
+  const dates = Array.from(new Set(logTimestamps.map(toLocalDateStr))).sort()
+  let max = 1, run = 1
+  for (let i = 1; i < dates.length; i++) {
+    const prev = new Date(`${dates[i - 1]}T12:00:00`)
+    const curr = new Date(`${dates[i]}T12:00:00`)
+    const diffDays = Math.round((curr.getTime() - prev.getTime()) / 86_400_000)
+    if (diffDays === 1) { run++; if (run > max) max = run } else run = 1
+  }
+  return max
+}
+
 // ── Care log labels ──────────────────────────────────────────────────────────
 
 export const CARE_LOG_LABELS: Record<string, string> = {
@@ -113,18 +141,13 @@ export const CARE_LOG_LABELS: Record<string, string> = {
   misted:        'Misted',
   pest_treatment:'Pest Treatment',
   moved:         'Moved',
+  measured:      'Measured',
 }
 
-export const CARE_LOG_ICONS: Record<string, string> = {
-  watered:       '💧',
-  fertilized:    '🌱',
-  note:          '📝',
-  repotted:      '🪴',
-  pruned:        '✂️',
-  misted:        '🌫️',
-  pest_treatment:'🐛',
-  moved:         '📍',
-}
+// computeFertilizingStatus is structurally identical to computeWateringStatus —
+// same interval + last-log logic, just for fertilizing. Exported separately
+// so call-sites read clearly.
+export const computeFertilizingStatus = computeWateringStatus
 
 // Sort order for urgency — lower number = higher urgency
 export const URGENCY_ORDER: Record<WateringStatus, number> = {

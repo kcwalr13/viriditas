@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { HairlineButton } from '@/components/ui'
 
 export default function SignUpPage() {
   const [email, setEmail]       = useState('')
@@ -33,12 +34,14 @@ export default function SignUpPage() {
 
   return (
     <>
-      <h1 className="text-2xl font-bold text-gray-900 mb-2">Create account</h1>
-      <p className="text-sm text-gray-500 mb-6">Start tracking your plant collection</p>
+      <h1 className="font-serif italic text-[28px] text-ink leading-tight mb-1">
+        Start your collection.
+      </h1>
+      <p className="font-sans text-sm text-ink-muted mb-7">Create an account to track your plants</p>
 
       <form onSubmit={handleSignUp} className="space-y-4">
         <div>
-          <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
+          <label htmlFor="email" className="block font-mono text-[10px] tracking-[0.14em] uppercase text-ink-muted mb-1.5">
             Email
           </label>
           <input
@@ -48,13 +51,13 @@ export default function SignUpPage() {
             required
             value={email}
             onChange={e => setEmail(e.target.value)}
-            className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
+            className="w-full px-4 py-3 border border-rule rounded-xl text-sm text-ink bg-paper focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
             placeholder="you@example.com"
           />
         </div>
 
         <div>
-          <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
+          <label htmlFor="password" className="block font-mono text-[10px] tracking-[0.14em] uppercase text-ink-muted mb-1.5">
             Password
           </label>
           <input
@@ -65,27 +68,23 @@ export default function SignUpPage() {
             minLength={6}
             value={password}
             onChange={e => setPassword(e.target.value)}
-            className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
+            className="w-full px-4 py-3 border border-rule rounded-xl text-sm text-ink bg-paper focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
             placeholder="At least 6 characters"
           />
         </div>
 
         {error && (
-          <p className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded-lg">{error}</p>
+          <p className="text-sm text-danger bg-danger-soft px-3 py-2 rounded-lg border border-rule">{error}</p>
         )}
 
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full bg-brand text-white font-semibold py-3 px-4 rounded-xl hover:bg-brand-light transition-colors disabled:opacity-60"
-        >
+        <HairlineButton type="submit" fullWidth disabled={loading}>
           {loading ? 'Creating account…' : 'Create Account'}
-        </button>
+        </HairlineButton>
       </form>
 
-      <p className="mt-6 text-center text-sm text-gray-500">
+      <p className="mt-6 text-center font-sans text-sm text-ink-muted">
         Already have an account?{' '}
-        <Link href="/sign-in" className="text-brand font-medium hover:underline">
+        <Link href="/sign-in" className="text-accent font-medium hover:underline">
           Sign in
         </Link>
       </p>

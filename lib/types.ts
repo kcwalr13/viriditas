@@ -7,11 +7,16 @@ export type Plant = {
   nickname: string
   species: string | null          // null means the user didn't fill this in
   notes: string | null
-  watering_interval_days: number | null  // null means no reminder set
-  location: string | null         // e.g. "Living room — east window"
-  pot_size: string | null         // e.g. "6 inch terracotta"
-  acquired_date: string | null    // ISO date string, e.g. "2024-03-15"
+  watering_interval_days: number | null     // null means no reminder set
+  fertilizing_interval_days: number | null  // null means no reminder set (Phase 12B)
+  soil_type: string | null         // e.g. "Aroid mix" (Phase 12C)
+  location: string | null          // e.g. "Living room — east window"
+  pot_size: string | null          // e.g. "6 inch terracotta"
+  acquired_date: string | null     // ISO date string, e.g. "2024-03-15"
   last_repotted_date: string | null
+  tags: string[]                    // freeform tag strings, e.g. ["rare", "propagation"]
+  pest_notes: string | null         // free-text notes on pest history
+  last_treatment_date: string | null // date of most recent pest treatment
   created_at: string
 }
 
@@ -31,7 +36,7 @@ export type CareLog = {
   //   watered, fertilized, note
   // Secondary actions (shown in the expandable "More" row):
   //   repotted, pruned, misted, pest_treatment, moved
-  type: 'watered' | 'fertilized' | 'note' | 'repotted' | 'pruned' | 'misted' | 'pest_treatment' | 'moved'
+  type: 'watered' | 'fertilized' | 'note' | 'repotted' | 'pruned' | 'misted' | 'pest_treatment' | 'moved' | 'measured'
   notes: string | null
   logged_at: string
 }
@@ -43,6 +48,7 @@ export type AnalysisResult = {
   photo_id: string | null  // which photo this analysis was based on
   species: string | null
   health: string | null
+  health_score: number | null  // 1–5 integer (Phase 12A); null for analyses before this was added
   care: string | null
   created_at: string
 }
@@ -64,8 +70,9 @@ export type SpeciesProfile = {
   common_problems: string | null
   growth_habits: string | null
   propagation: string | null
-  pruning_tips: string | null     // how and when to prune; shape/health benefits
-  disease_symptoms: string | null // visual signs of disease, pests, nutrient deficiency
+  pruning_tips: string | null       // how and when to prune; shape/health benefits
+  disease_symptoms: string | null   // visual signs of disease, pests, nutrient deficiency
+  seasonal_care: string | null      // season-specific care notes (Phase 12E); null for cached profiles before this was added
   fetched_at: string
   updated_at: string
 }

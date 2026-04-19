@@ -14,7 +14,7 @@
 //   Upload/snap → identify-species → fetch-species-info → species detail
 
 import { createClient } from '@/lib/supabase/client'
-import { formatTimestamp } from '@/lib/utils'
+import { formatTimestamp, relativeTime } from '@/lib/utils'
 import type { SpeciesProfile } from '@/lib/types'
 import { useEffect, useRef, useState } from 'react'
 import { BigTitle, HairlineButton, SectionLabel } from '@/components/ui'
@@ -31,33 +31,41 @@ interface Suggestion extends SuggestionBase {
 }
 
 const CATEGORIES = [
-  { name: 'Beginner-friendly',    count: 24 },
-  { name: 'Low light',            count: 18 },
-  { name: 'Pet-safe',             count: 31 },
-  { name: 'Trailing & climbing',  count: 14 },
-  { name: 'Blooming houseplants', count: 22 },
-  { name: 'Desert & succulent',   count: 19 },
+  { name: 'Beginner-friendly',    subtitle: 'Hard to kill' },
+  { name: 'Low light',            subtitle: 'For dim corners' },
+  { name: 'Pet-safe',             subtitle: 'Non-toxic varieties' },
+  { name: 'Trailing & climbing',  subtitle: 'Vines and cascaders' },
+  { name: 'Blooming houseplants', subtitle: 'Colour indoors' },
+  { name: 'Desert & succulent',   subtitle: 'Drought tolerant' },
 ]
 
 const FEATURED = [
-  { scientific: 'Monstera deliciosa',     common: 'Swiss cheese plant',   difficulty: 'Easy' },
-  { scientific: 'Ficus lyrata',           common: 'Fiddle Leaf Fig',      difficulty: 'Fussy' },
+  { scientific: 'Monstera deliciosa',      common: 'Swiss cheese plant',  difficulty: 'Easy' },
+  { scientific: 'Ficus lyrata',            common: 'Fiddle Leaf Fig',     difficulty: 'Fussy' },
   { scientific: 'Sansevieria trifasciata', common: 'Snake Plant',         difficulty: 'Easy' },
-  { scientific: 'Calathea orbifolia',     common: 'Prayer plant',         difficulty: 'Tricky' },
-  { scientific: 'Pilea peperomioides',    common: 'Chinese money plant',  difficulty: 'Easy' },
-  { scientific: 'Epipremnum aureum',      common: 'Pothos',               difficulty: 'Beginner' },
+  { scientific: 'Calathea orbifolia',      common: 'Prayer plant',        difficulty: 'Tricky' },
+  { scientific: 'Pilea peperomioides',     common: 'Chinese money plant', difficulty: 'Easy' },
+  { scientific: 'Epipremnum aureum',       common: 'Pothos',              difficulty: 'Beginner' },
 ]
 
 // Recently viewed — persisted in localStorage so refreshing doesn't wipe it.
+// Format: { name: string; viewedAt: number }[] (Unix ms). Handles legacy string[] gracefully.
+type RecentEntry = { name: string; viewedAt: number }
 const RECENT_KEY = 'viriditas.explore.recent'
-function loadRecent(): string[] {
+function loadRecent(): RecentEntry[] {
   if (typeof window === 'undefined') return []
-  try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]') } catch { return [] }
+  try {
+    const raw = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]') as unknown[]
+    return raw.map(item => typeof item === 'string'
+      ? { name: item, viewedAt: 0 }
+      : (item as RecentEntry)
+    )
+  } catch { return [] }
 }
 function pushRecent(name: string) {
   if (typeof window === 'undefined') return
-  const existing = loadRecent().filter(n => n !== name)
-  const next = [name, ...existing].slice(0, 6)
+  const existing = loadRecent().filter(e => e.name !== name)
+  const next: RecentEntry[] = [{ name, viewedAt: Date.now() }, ...existing].slice(0, 6)
   localStorage.setItem(RECENT_KEY, JSON.stringify(next))
 }
 
@@ -72,11 +80,59 @@ export default function ExplorePage() {
   const [loading, setLoading] = useState(false)
   const [photoLoading, setPhotoLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [recent, setRecent] = useState<string[]>([])
+  const [recent, setRecent] = useState<RecentEntry[]>([])
 
+  const [featuredThumbs, setFeaturedThumbs] = useState<Record<string, string>>({})
+  const [recentThumbs, setRecentThumbs] = useState<Record<string, string>>({})
+  const [userPlants, setUserPlants] = useState<Array<{ id: string; nickname: string; species: string | null }>>([])
+  // When arriving via ?species= deep link, "back" should navigate to the previous page.
+  const [deepLinked, setDeepLinked] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { setRecent(loadRecent()) }, [])
+
+  // Load user's registered plants once for "You have X of these" callouts.
+  useEffect(() => {
+    async function loadPlants() {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) return
+      const { data } = await supabase.from('plants').select('id, nickname, species').eq('user_id', session.user.id)
+      setUserPlants(data ?? [])
+    }
+    loadPlants()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-open a species profile when ?species= is in the URL (e.g. from Plant Detail).
+  // When deep-linked, "Back to library" navigates to browser history instead of clearing profile.
+  useEffect(() => {
+    const pre = new URLSearchParams(window.location.search).get('species')
+    if (pre) { setDeepLinked(true); fetchProfile(pre) }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch Wikipedia thumbnails for recently-viewed species when the list changes.
+  useEffect(() => {
+    recent.forEach(async ({ name }) => {
+      if (recentThumbs[name]) return
+      try {
+        const res = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(name)}`)
+        if (!res.ok) return
+        const wiki = await res.json() as { thumbnail?: { source?: string } }
+        if (wiki.thumbnail?.source) setRecentThumbs(prev => ({ ...prev, [name]: wiki.thumbnail!.source! }))
+      } catch { /* gradient fallback */ }
+    })
+  }, [recent]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch Wikipedia thumbnails for the featured carousel once on mount.
+  useEffect(() => {
+    FEATURED.forEach(async s => {
+      try {
+        const res = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(s.scientific)}`)
+        if (!res.ok) return
+        const wiki = await res.json() as { thumbnail?: { source?: string } }
+        if (wiki.thumbnail?.source) setFeaturedThumbs(prev => ({ ...prev, [s.scientific]: wiki.thumbnail!.source! }))
+      } catch { /* ignore — gradient placeholder shown instead */ }
+    })
+  }, [])
 
   async function getToken(): Promise<string> {
     const { data: { session } } = await supabase.auth.getSession()
@@ -134,7 +190,7 @@ export default function ExplorePage() {
       if (data?.error) throw new Error(data.error)
       if (!data?.profile) throw new Error('No profile returned.')
       setProfile(data.profile)
-      setSuggestions([])
+      // Don't clear suggestions — preserve them so Back restores the search results.
       pushRecent(speciesName.trim())
       setRecent(loadRecent())
     } catch (err: unknown) {
@@ -186,6 +242,7 @@ export default function ExplorePage() {
   }
 
   function handleBack() {
+    if (deepLinked) { window.history.back(); return }
     setProfile(null)
     setIdentifiedName(null)
     setError(null)
@@ -343,63 +400,89 @@ export default function ExplorePage() {
                     <div className="font-serif italic text-[16px] text-ink leading-tight tracking-[-0.01em]">
                       {c.name}
                     </div>
-                    <div className="text-[11px] text-ink-soft mt-0.5">{c.count} species</div>
+                    <div className="text-[11px] text-ink-soft mt-0.5">{c.subtitle}</div>
                   </div>
                 </button>
               )
             })}
           </div>
 
-          <SectionLabel number="§ 02" title="Featured this season" />
+          <SectionLabel number="§ 02" title={`Featured — ${['Winter', 'Winter', 'Spring', 'Spring', 'Spring', 'Summer', 'Summer', 'Summer', 'Autumn', 'Autumn', 'Autumn', 'Winter'][new Date().getMonth()]}`} />
           <div className="vr-scroll flex gap-2.5 px-5 overflow-x-auto pb-1">
-            {FEATURED.map(s => (
-              <button
-                key={s.scientific}
-                onClick={() => fetchProfile(s.scientific)}
-                className="shrink-0 w-[180px] text-left"
-              >
-                <div className="relative w-[180px] h-[220px] rounded-brand overflow-hidden border border-rule">
-                  <PlantPhoto name={s.scientific} label={s.common} />
-                </div>
-                <div className="pt-2">
-                  <div className="font-serif italic text-[16px] text-ink tracking-[-0.01em]">{s.common}</div>
-                  <div className="text-[11px] text-ink-muted mt-0.5 italic">{s.scientific}</div>
-                  <div className="mt-1.5">
-                    <span
-                      className={`inline-block font-mono text-[9px] tracking-[0.08em] uppercase px-1.5 py-0.5 rounded-full ${
-                        s.difficulty === 'Easy' || s.difficulty === 'Beginner'
-                          ? 'bg-accent-soft text-accent'
-                          : s.difficulty === 'Tricky'
-                          ? 'bg-warn-soft text-warn'
-                          : 'bg-danger-soft text-danger'
-                      }`}
-                    >
-                      {s.difficulty}
-                    </span>
+            {FEATURED.map(s => {
+              const thumb = featuredThumbs[s.scientific]
+              return (
+                <button
+                  key={s.scientific}
+                  onClick={() => fetchProfile(s.scientific)}
+                  className="shrink-0 w-[180px] text-left"
+                >
+                  <div className="relative w-[180px] h-[220px] rounded-brand overflow-hidden border border-rule bg-paper-alt">
+                    {thumb ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={thumb} alt={s.common} className="w-full h-full object-cover" />
+                    ) : (
+                      <PlantPhoto name={s.scientific} label={s.common} />
+                    )}
                   </div>
-                </div>
-              </button>
-            ))}
+                  <div className="pt-2">
+                    <div className="font-serif italic text-[16px] text-ink tracking-[-0.01em]">{s.common}</div>
+                    <div className="text-[11px] text-ink-muted mt-0.5 italic">{s.scientific}</div>
+                    <div className="mt-1.5">
+                      <span
+                        className={`inline-block font-mono text-[9px] tracking-[0.08em] uppercase px-1.5 py-0.5 rounded-full ${
+                          s.difficulty === 'Easy' || s.difficulty === 'Beginner'
+                            ? 'bg-accent-soft text-accent'
+                            : s.difficulty === 'Tricky'
+                            ? 'bg-warn-soft text-warn'
+                            : 'bg-danger-soft text-danger'
+                        }`}
+                      >
+                        {s.difficulty}
+                      </span>
+                    </div>
+                  </div>
+                </button>
+              )
+            })}
           </div>
 
           {recent.length > 0 && (
             <>
-              <SectionLabel number="§ 03" title="Recently viewed" />
+              <SectionLabel
+                number="§ 03"
+                title="Recently viewed"
+                action="Clear"
+                onAction={() => {
+                  localStorage.removeItem(RECENT_KEY)
+                  setRecent([])
+                }}
+              />
               <div className="px-5 flex flex-col gap-1.5">
-                {recent.map((name, i) => (
+                {recent.map((entry, i) => (
                   <button
-                    key={name}
-                    onClick={() => fetchProfile(name)}
+                    key={entry.name}
+                    onClick={() => fetchProfile(entry.name)}
                     className="w-full px-3.5 py-3 flex items-center gap-3 bg-card border border-rule rounded-brand"
                   >
                     <span className="font-mono text-[10px] text-ink-muted w-5 shrink-0">
                       {String(i + 1).padStart(2, '0')}
                     </span>
-                    <div className="w-[38px] h-[38px] rounded-lg overflow-hidden border border-rule">
-                      <PlantPhoto name={name} showLabel={false} />
+                    <div className="w-[38px] h-[38px] rounded-lg overflow-hidden border border-rule relative">
+                      {recentThumbs[entry.name] ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={recentThumbs[entry.name]} alt={entry.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <PlantPhoto name={entry.name} showLabel={false} />
+                      )}
                     </div>
-                    <div className="flex-1 text-left">
-                      <div className="font-serif italic text-[15px] text-ink truncate">{name}</div>
+                    <div className="flex-1 text-left min-w-0">
+                      <div className="font-serif italic text-[15px] text-ink truncate">{entry.name}</div>
+                      {entry.viewedAt > 0 && (
+                        <div className="font-mono text-[9px] uppercase tracking-[0.08em] text-ink-muted mt-0.5">
+                          {relativeTime(new Date(entry.viewedAt).toISOString())}
+                        </div>
+                      )}
                     </div>
                     <Icon name="chev" size={14} className="text-ink-muted" />
                   </button>
@@ -417,6 +500,10 @@ export default function ExplorePage() {
           identifiedFrom={identifiedName}
           onBack={handleBack}
           onRefresh={() => fetchProfile(profile.species_name, true)}
+          matchingPlants={userPlants.filter(p =>
+            p.species?.toLowerCase() === profile.species_name.toLowerCase() ||
+            profile.common_names?.toLowerCase().split(',').some(n => n.trim() === p.species?.toLowerCase())
+          )}
         />
       )}
     </div>
@@ -435,18 +522,36 @@ function LoadingBlock({ icon, text }: { icon: 'search' | 'camera' | 'leaf'; text
 }
 
 function SpeciesDetail({
-  profile, identifiedFrom, onBack, onRefresh,
+  profile, identifiedFrom, onBack, onRefresh, matchingPlants,
 }: {
   profile: SpeciesProfile
   identifiedFrom: string | null
   onBack: () => void
   onRefresh: () => void
+  matchingPlants: Array<{ id: string; nickname: string; species: string | null }>
 }) {
+  const [heroThumb, setHeroThumb] = useState<string | null>(null)
+
+  useEffect(() => {
+    const query = profile.scientific_name || profile.species_name
+    fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(query)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then((wiki: { thumbnail?: { source?: string } } | null) => {
+        if (wiki?.thumbnail?.source) setHeroThumb(wiki.thumbnail.source)
+      })
+      .catch(() => {})
+  }, [profile.scientific_name, profile.species_name])
+
   return (
     <div>
       {/* Hero */}
       <div className="relative h-[280px] overflow-hidden">
-        <PlantPhoto name={profile.species_name} showLabel={false} />
+        {heroThumb ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={heroThumb} alt={profile.species_name} className="w-full h-full object-cover" />
+        ) : (
+          <PlantPhoto name={profile.species_name} showLabel={false} />
+        )}
         <button
           onClick={onBack}
           aria-label="Back"
@@ -459,7 +564,7 @@ function SpeciesDetail({
           className="absolute bottom-0 left-0 right-0 h-32 pointer-events-none"
           style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.55), transparent)' }}
         />
-        <div className="absolute bottom-4 left-5 right-5 text-white">
+        <div className="absolute bottom-4 left-5 right-14 text-white">
           <div className="font-mono text-[10px] tracking-[0.16em] uppercase opacity-80 mb-1">
             {identifiedFrom ? 'Identified from photo' : 'From the Field Guide'}
           </div>
@@ -470,6 +575,14 @@ function SpeciesDetail({
             <div className="text-[13px] mt-1 opacity-85 italic">{profile.scientific_name}</div>
           )}
         </div>
+        <button
+          onClick={() => navigator.clipboard.writeText(profile.scientific_name ?? profile.species_name).catch(() => {})}
+          aria-label="Copy scientific name"
+          className="absolute bottom-5 right-5 w-8 h-8 rounded-full flex items-center justify-center"
+          style={{ background: 'rgba(255,255,255,0.18)' }}
+        >
+          <Icon name="arrow-up" size={14} stroke={2} className="text-paper" />
+        </button>
       </div>
 
       {/* Quick facts */}
@@ -478,6 +591,26 @@ function SpeciesDetail({
         <QuickFact icon="drop"    label="Water"    value={shortPreview(profile.watering)} />
         <QuickFact icon="warning" label="Pets"     value={toxicityShort(profile.toxicity)} tone={profile.toxicity?.toLowerCase().includes('toxic') ? 'danger' : 'good'} />
       </div>
+
+      {/* Your plants callout */}
+      {matchingPlants.length > 0 && (
+        <div className="mx-5 mt-4 p-3.5 bg-accent-soft border border-rule rounded-brand">
+          <div className="font-mono text-[9px] tracking-[0.14em] uppercase text-accent mb-2">
+            {matchingPlants.length === 1 ? 'You have one' : `You have ${matchingPlants.length}`}
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {matchingPlants.map(p => (
+              <a key={p.id} href={`/plant/${p.id}`} className="flex items-center gap-2 group">
+                <Icon name="leaf" size={12} stroke={1.9} className="text-accent shrink-0" />
+                <span className="font-serif italic text-[14px] text-ink group-hover:text-accent truncate">
+                  {p.nickname}
+                </span>
+                <Icon name="chev" size={12} className="text-ink-muted ml-auto shrink-0" />
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Sections */}
       <SectionLabel number="§ 01" title="Care" />
@@ -557,7 +690,30 @@ function SpeciesDetail({
         </HairlineButton>
       </div>
 
-      <div className="mt-5 px-5">
+      <div className="mt-5 px-5 flex flex-col gap-2.5 pb-4">
+        {matchingPlants.length === 0 ? (
+          <HairlineButton
+            variant="solid"
+            fullWidth
+            onClick={() => {
+              const name = encodeURIComponent(profile.species_name)
+              window.location.href = `/add-plant?species=${name}`
+            }}
+          >
+            <Icon name="plus" size={14} stroke={2} /> I have one — add to collection
+          </HairlineButton>
+        ) : (
+          <HairlineButton
+            variant="solid"
+            fullWidth
+            onClick={() => {
+              const name = encodeURIComponent(profile.species_name)
+              window.location.href = `/add-plant?species=${name}`
+            }}
+          >
+            <Icon name="plus" size={14} stroke={2} /> Add another to collection
+          </HairlineButton>
+        )}
         <HairlineButton variant="outline" onClick={onBack} fullWidth>
           <Icon name="back" size={14} stroke={1.9} /> Back to library
         </HairlineButton>

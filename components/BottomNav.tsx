@@ -5,6 +5,7 @@
 // /explore (Encyclopedia), /settings (Me).
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import { Icon, type IconName } from './Icon'
 
 interface NavItem { href: string; label: string; icon: IconName }
@@ -18,9 +19,17 @@ const ITEMS: NavItem[] = [
 
 export function BottomNav() {
   const pathname = usePathname()
+  const [overdueCount, setOverdueCount] = useState(0)
+  useEffect(() => {
+    const n = parseInt(localStorage.getItem('viriditas.overdueCount') ?? '0', 10)
+    setOverdueCount(isNaN(n) ? 0 : n)
+  }, [pathname])
+
+  // Hide on plant detail (has its own care dock) and add-plant wizard (modal flow).
+  if (pathname.startsWith('/plant/') || pathname === '/add-plant') return null
 
   // Decide which tab is active based on URL prefix.
-  // /plant/[id] stays under "Plants"; /add-plant stays under "Plants" too.
+  // /add-plant stays under "Plants".
   function isActive(href: string): boolean {
     if (href === '/') return pathname === '/'
     if (href === '/plants') return pathname === '/plants' || pathname.startsWith('/plant/') || pathname === '/add-plant'
@@ -47,7 +56,12 @@ export function BottomNav() {
                     : 'bg-transparent text-ink-soft px-3 py-2.5'
                 }`}
               >
-                <Icon name={item.icon} size={16} stroke={1.8} />
+                <span className="relative inline-flex">
+                  <Icon name={item.icon} size={16} stroke={1.8} />
+                  {item.href === '/' && overdueCount > 0 && !on && (
+                    <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-danger" />
+                  )}
+                </span>
                 {on && <span>{item.label}</span>}
               </Link>
             )

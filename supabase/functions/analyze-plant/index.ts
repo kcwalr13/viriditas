@@ -7,31 +7,23 @@
 // Accepts:
 //   imageUrl         — public URL to the plant photo (required)
 //   previousAnalyses — array of past analysis summaries (optional)
-//                      When provided, the AI uses them to comment on progress over time.
 //   recentCareLogs   — array of recent care events (optional)
-//                      Used to make recommendations more contextually relevant.
 //   speciesProfile   — cached species reference data from species_profiles table (optional)
-//                      When provided, the AI knows the species' ideal conditions up front,
-//                      making health assessments and recommendations more accurate.
+//   plantContext     — location, pot size, soil type for grounded recommendations (optional)
+//   seasonContext    — current month + hemisphere for season-aware advice (optional)
 //
-// Supported providers (set via AI_PROVIDER secret):
-//   claude  — Anthropic Claude API (current default)
-//   gemini  — Google Gemini
+// Returns: { result: { species, health, health_score, care } }
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { encode as encodeBase64 } from 'https://deno.land/std@0.168.0/encoding/base64.ts'
 
-// Required for all Supabase Edge Functions — allows the app to call this function
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-// ── Prompt builder ─────────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-// Builds the analysis prompt, weaving in species reference data, analysis history,
-// and care log context when available so the AI can give species-aware,
-// progress-aware, care-informed responses.
 type PreviousAnalysis = {
   date: string
   species: string | null
@@ -45,7 +37,6 @@ type CareLogEntry = {
   date: string
 }
 
-// Matches the fields stored in species_profiles
 type SpeciesProfileContext = {
   scientific_name?: string | null
   light?: string | null
@@ -56,26 +47,31 @@ type SpeciesProfileContext = {
   [key: string]: string | null | undefined
 }
 
-// Physical context about the individual plant — location and pot info
-// help the AI give more grounded, specific recommendations
 type PlantContext = {
-  location?: string | null   // e.g. "Living room — east window"
-  pot_size?: string | null   // e.g. "6 inch terracotta"
+  location?: string | null
+  pot_size?: string | null
+  soil_type?: string | null   // e.g. "aroid mix" — affects watering frequency advice (Phase 12C)
 }
+
+type SeasonContext = {
+  month: number                          // 1–12
+  hemisphere: 'northern' | 'southern'   // northern by default
+}
+
+// ── Prompt builder ────────────────────────────────────────────────────────────
 
 function buildPrompt(
   previousAnalyses: PreviousAnalysis[],
   recentCareLogs: CareLogEntry[],
   speciesProfile: SpeciesProfileContext | null,
-  plantContext: PlantContext | null
+  plantContext: PlantContext | null,
+  seasonContext: SeasonContext | null
 ): string {
   const hasHistory = previousAnalyses.length > 0
-  const hasCare = recentCareLogs.length > 0
+  const hasCare    = recentCareLogs.length > 0
 
-  // When we have a species profile, include the key care facts so the AI can
-  // assess whether current conditions match what the species actually needs.
   const speciesSection = speciesProfile
-    ? `\nSpecies reference data (use this to assess whether the plant's conditions and health match its known requirements):
+    ? `\nSpecies reference data (use this to assess whether the plant's conditions match its known requirements):
 - Scientific name: ${speciesProfile.scientific_name ?? 'unknown'}
 - Light needs: ${speciesProfile.light ?? 'unknown'}
 - Watering: ${speciesProfile.watering ?? 'unknown'}
@@ -84,12 +80,29 @@ function buildPrompt(
 - Common problems: ${speciesProfile.common_problems ?? 'unknown'}`
     : ''
 
-  // Location and pot size give context that makes recommendations more actionable —
-  // e.g. if the plant is in a north-facing window, light advice changes significantly
-  const plantContextSection = plantContext && (plantContext.location || plantContext.pot_size)
-    ? `\nPlant context:${plantContext.location ? `\n- Location: ${plantContext.location}` : ''}${plantContext.pot_size ? `\n- Pot size: ${plantContext.pot_size}` : ''}
-Factor this into your recommendations — for example, reference the specific light conditions of their location, or comment on whether the pot size seems appropriate.`
+  const contextParts: string[] = []
+  if (plantContext?.location)  contextParts.push(`- Location: ${plantContext.location}`)
+  if (plantContext?.pot_size)  contextParts.push(`- Pot size: ${plantContext.pot_size}`)
+  if (plantContext?.soil_type) contextParts.push(`- Soil type: ${plantContext.soil_type}`)
+  const plantContextSection = contextParts.length > 0
+    ? `\nPlant context:\n${contextParts.join('\n')}\nFactor this into your recommendations — reference the specific conditions of their location, and let soil type inform watering frequency advice.`
     : ''
+
+  // Seasonal context: lets the AI give season-appropriate advice and flag
+  // when winter dormancy should prompt interval adjustments.
+  let seasonSection = ''
+  if (seasonContext) {
+    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+    const monthName  = monthNames[seasonContext.month - 1]
+    const isWinter   = seasonContext.hemisphere === 'northern'
+      ? [11, 12, 1, 2].includes(seasonContext.month)
+      : [5, 6, 7, 8].includes(seasonContext.month)
+    seasonSection = `\nSeasonal context: ${monthName} (${seasonContext.hemisphere} hemisphere).${
+      isWinter
+        ? ' It is currently winter — most houseplants have slower growth and need less frequent watering. Mention this if it is relevant to the plant\'s care.'
+        : ''
+    }`
+  }
 
   const historySection = hasHistory
     ? `\nPrevious analysis history (most recent first):
@@ -104,7 +117,7 @@ Compare what you observe now against this history and note whether the plant is 
 ${recentCareLogs.map(l =>
   `[${l.date}] ${l.type}${l.notes ? `: ${l.notes}` : ''}`
 ).join('\n')}
-Factor this care history into your assessment and recommendations — for example, if the plant was recently watered, don't recommend watering unless there's a clear need.`
+Factor this care history into your assessment — if the plant was recently watered, don't recommend watering unless there's a clear need.`
     : ''
 
   const healthInstruction = hasHistory
@@ -116,65 +129,36 @@ Analyze this photo of a houseplant and respond with a JSON object in exactly thi
 {
   "species": "Common name (Scientific name if known)",
   "health": "A 2-3 sentence assessment of the plant's current health. ${healthInstruction}",
+  "health_score": 4,
   "care": "2-3 specific, actionable care recommendations for this plant right now."
 }
-Only respond with the JSON object. No extra text.${speciesSection}${plantContextSection}${historySection}${careSection}`
+health_score must be an integer from 1 to 5: 1=critical, 2=poor, 3=fair, 4=good, 5=excellent.
+Only respond with the JSON object. No extra text.${speciesSection}${plantContextSection}${seasonSection}${historySection}${careSection}`
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-// Supported image media types for both Claude and Gemini
 type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
 
-// Detect the real image format by inspecting the first few bytes of the file.
-// Every image format has a unique "magic byte" signature at the start.
-// This is more reliable than trusting the Content-Type header, which can be
-// wrong if the file was uploaded with an incorrect type (e.g., a WebP saved as .jpg).
 function detectMediaType(bytes: Uint8Array): ImageMediaType {
-  // WebP: starts with "RIFF" (52 49 46 46), then 4 size bytes, then "WEBP" (57 45 42 50)
   if (
     bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
     bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
   ) return 'image/webp'
-
-  // PNG: starts with \x89PNG\r\n\x1a\n
-  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) {
-    return 'image/png'
-  }
-
-  // GIF: starts with "GIF8"
-  if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) {
-    return 'image/gif'
-  }
-
-  // JPEG: starts with \xFF\xD8\xFF
-  if (bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) {
-    return 'image/jpeg'
-  }
-
-  // Default to jpeg if unrecognised
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) return 'image/png'
+  if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) return 'image/gif'
+  if (bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) return 'image/jpeg'
   return 'image/jpeg'
 }
 
-// Fetch an image from a URL and return it as a base64 string plus its real media type.
-// We detect the type from the actual bytes rather than the Content-Type header, because
-// Supabase Storage may serve files with an incorrect content-type if they were uploaded
-// with the wrong one (e.g., a WebP file uploaded with contentType: 'image/jpeg').
 async function fetchImageAsBase64(imageUrl: string): Promise<{ base64: string; mediaType: ImageMediaType }> {
   const response = await fetch(imageUrl)
-  if (!response.ok) {
-    throw new Error(`Failed to fetch image (${response.status}): ${imageUrl}`)
-  }
-
+  if (!response.ok) throw new Error(`Failed to fetch image (${response.status}): ${imageUrl}`)
   const arrayBuffer = await response.arrayBuffer()
   const bytes = new Uint8Array(arrayBuffer)
   const base64 = encodeBase64(arrayBuffer)
-
-  // Detect format from magic bytes — immune to wrong Content-Type headers
   const mediaType = detectMediaType(bytes)
-  const headerType = response.headers.get('content-type') ?? 'unknown'
-  console.log(`Fetched image — header content-type: ${headerType}, detected media type: ${mediaType}`)
-
+  console.log(`Fetched image — detected media type: ${mediaType}`)
   return { base64, mediaType }
 }
 
@@ -197,11 +181,7 @@ async function callClaude(base64Image: string, mediaType: ImageMediaType, prompt
       messages: [{
         role: 'user',
         content: [
-          {
-            type: 'image',
-            // Use the actual detected media type — not a hardcoded jpeg
-            source: { type: 'base64', media_type: mediaType, data: base64Image },
-          },
+          { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64Image } },
           { type: 'text', text: prompt },
         ],
       }],
@@ -209,13 +189,7 @@ async function callClaude(base64Image: string, mediaType: ImageMediaType, prompt
   })
 
   const data = await response.json()
-
-  if (!response.ok) {
-    throw new Error(data.error?.message ?? 'Claude API error')
-  }
-
-  // Claude sometimes wraps JSON in markdown code fences (```json ... ```)
-  // Strip those out before returning so JSON.parse() works cleanly
+  if (!response.ok) throw new Error(data.error?.message ?? 'Claude API error')
   let text: string = data.content[0].text
   text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
   return text
@@ -236,7 +210,6 @@ async function callGemini(base64Image: string, mediaType: ImageMediaType, prompt
     body: JSON.stringify({
       contents: [{
         parts: [
-          // Use the actual detected media type — not a hardcoded jpeg
           { inline_data: { mime_type: mediaType, data: base64Image } },
           { text: prompt },
         ],
@@ -246,28 +219,23 @@ async function callGemini(base64Image: string, mediaType: ImageMediaType, prompt
   })
 
   const data = await response.json()
-
-  if (!response.ok) {
-    throw new Error(data.error?.message ?? 'Gemini API error')
-  }
-
+  if (!response.ok) throw new Error(data.error?.message ?? 'Gemini API error')
   return data.candidates[0].content.parts[0].text
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
-  }
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
     const {
       imageUrl,
       previousAnalyses = [],
-      recentCareLogs = [],
-      speciesProfile = null,   // optional cached species reference data
-      plantContext = null,     // optional location/pot info for more grounded recommendations
+      recentCareLogs   = [],
+      speciesProfile   = null,
+      plantContext     = null,
+      seasonContext    = null,
     } = await req.json()
 
     if (!imageUrl) {
@@ -277,22 +245,17 @@ serve(async (req) => {
       )
     }
 
-    // Build a prompt that includes all available context
-    const prompt = buildPrompt(previousAnalyses, recentCareLogs, speciesProfile, plantContext)
+    const prompt = buildPrompt(previousAnalyses, recentCareLogs, speciesProfile, plantContext, seasonContext)
     console.log(
       'Analysis with',
       previousAnalyses.length, 'previous analyses,',
       recentCareLogs.length, 'care log entries,',
-      speciesProfile ? 'species profile included' : 'no species profile,',
-      plantContext?.location ? `location: ${plantContext.location}` : 'no location'
+      speciesProfile ? 'species profile included' : 'no species profile',
+      seasonContext  ? `month: ${seasonContext.month}` : 'no season context'
     )
 
-    // Fetch the image from the URL and convert to base64 server-side.
-    // fetchImageAsBase64 also detects the real media type from response headers
-    // so we don't hardcode jpeg and break on WebP uploads from the browser.
     const { base64: base64Image, mediaType } = await fetchImageAsBase64(imageUrl)
 
-    // Choose provider based on environment variable — defaults to claude
     const provider = Deno.env.get('AI_PROVIDER') ?? 'claude'
     let resultText: string
 
@@ -305,6 +268,11 @@ serve(async (req) => {
     }
 
     const result = JSON.parse(resultText)
+
+    // Clamp health_score to the valid 1–5 range in case the model drifts
+    if (typeof result.health_score === 'number') {
+      result.health_score = Math.min(5, Math.max(1, Math.round(result.health_score)))
+    }
 
     return new Response(
       JSON.stringify({ result }),

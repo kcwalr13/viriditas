@@ -12,7 +12,7 @@ export type IconName =
   | 'search' | 'home' | 'book' | 'cog' | 'calendar' | 'edit' | 'trash'
   | 'dots' | 'sparkle' | 'flame' | 'arrow-up' | 'arrow-right'
   | 'thermometer' | 'humidity' | 'soil' | 'warning' | 'room' | 'pot'
-  | 'clock' | 'heart' | 'close' | 'filter' | 'grid' | 'list'
+  | 'clock' | 'heart' | 'close' | 'filter' | 'grid' | 'list' | 'ruler'
 
 // Each entry is the inner <path>/<circle>/… elements of a 24x24 viewBox.
 const ICONS: Record<IconName, React.ReactNode> = {
@@ -53,6 +53,7 @@ const ICONS: Record<IconName, React.ReactNode> = {
   filter:     <><path d="M3 5h18M6 12h12M10 19h4"/></>,
   grid:       <><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></>,
   list:       <><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></>,
+  ruler:      <><path d="M3 21L21 3M9.5 14.5L11 13M13.5 12L15 10.5M6.5 17.5L8 16M16 9.5L17.5 8"/></>,
 }
 
 export interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'name' | 'stroke'> {

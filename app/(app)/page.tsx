@@ -6,7 +6,7 @@
 // Server Component — fetches and enriches; passes a pre-computed shape to the
 // client for rendering.
 import { createClient } from '@/lib/supabase/server'
-import { computeStreak, computeWateringStatus, URGENCY_ORDER } from '@/lib/utils'
+import { computeStreak, computeWateringStatus, computeFertilizingStatus, URGENCY_ORDER } from '@/lib/utils'
 import type { CareLog, Plant, PlantPhoto, AnalysisResult } from '@/lib/types'
 import TodayClient from './TodayClient'
 
@@ -14,8 +14,11 @@ export type PlantCard = {
   plant: Plant
   coverPhotoUrl: string | null
   wateringStatus: ReturnType<typeof computeWateringStatus>
+  fertilizingStatus: ReturnType<typeof computeFertilizingStatus>
   lastWateredLog: CareLog | null
+  lastFertilizedLog: CareLog | null
   daysSinceWatered: number | null
+  daysSinceFertilized: number | null
 }
 
 // The "journal peek" — we use the most recent AI analysis for any plant as
@@ -26,6 +29,7 @@ export type JournalPeek = {
   plantSpecies: string | null
   createdAt: string
   health: string | null
+  coverPhotoUrl: string | null
 } | null
 
 export default async function TodayPage() {
@@ -41,7 +45,7 @@ export default async function TodayPage() {
     .order('created_at', { ascending: true })
 
   if (!plants || plants.length === 0) {
-    return <TodayClient cards={[]} streak={0} journalPeek={null} />
+    return <TodayClient cards={[]} streak={0} journalPeek={null} tendedToday={0} activityDays={[]} weeklyLogs={0} />
   }
 
   const plantIds = plants.map(p => p.id)
@@ -59,16 +63,16 @@ export default async function TodayPage() {
   ])
 
   // Build lookup maps — first hit per plant_id = most recent.
-  const coverPhotoMap  = new Map<string, PlantPhoto>()
-  const lastWateredMap = new Map<string, CareLog>()
+  const coverPhotoMap    = new Map<string, PlantPhoto>()
+  const lastWateredMap   = new Map<string, CareLog>()
+  const lastFertilizedMap = new Map<string, CareLog>()
 
   for (const photo of photos ?? []) {
     if (!coverPhotoMap.has(photo.plant_id)) coverPhotoMap.set(photo.plant_id, photo)
   }
   for (const log of careLogs ?? []) {
-    if (log.type === 'watered' && !lastWateredMap.has(log.plant_id)) {
-      lastWateredMap.set(log.plant_id, log)
-    }
+    if (log.type === 'watered'    && !lastWateredMap.has(log.plant_id))    lastWateredMap.set(log.plant_id, log)
+    if (log.type === 'fertilized' && !lastFertilizedMap.has(log.plant_id)) lastFertilizedMap.set(log.plant_id, log)
   }
 
   function getPhotoUrl(path: string): string {
@@ -76,21 +80,33 @@ export default async function TodayPage() {
   }
 
   const cards: PlantCard[] = plants.map(plant => {
-    const coverPhoto     = coverPhotoMap.get(plant.id)
-    const lastWateredLog = lastWateredMap.get(plant.id) ?? null
+    const coverPhoto        = coverPhotoMap.get(plant.id)
+    const lastWateredLog    = lastWateredMap.get(plant.id) ?? null
+    const lastFertilizedLog = lastFertilizedMap.get(plant.id) ?? null
     const daysSinceWatered = lastWateredLog
       ? Math.floor((Date.now() - new Date(lastWateredLog.logged_at).getTime()) / 86_400_000)
+      : null
+    const daysSinceFertilized = lastFertilizedLog
+      ? Math.floor((Date.now() - new Date(lastFertilizedLog.logged_at).getTime()) / 86_400_000)
       : null
     return {
       plant,
       coverPhotoUrl: coverPhoto ? getPhotoUrl(coverPhoto.storage_path) : null,
-      wateringStatus: computeWateringStatus(plant.watering_interval_days, lastWateredLog),
+      wateringStatus:    computeWateringStatus(plant.watering_interval_days, lastWateredLog),
+      fertilizingStatus: computeFertilizingStatus(plant.fertilizing_interval_days, lastFertilizedLog),
       lastWateredLog,
+      lastFertilizedLog,
       daysSinceWatered,
+      daysSinceFertilized,
     }
   })
 
-  cards.sort((a, b) => URGENCY_ORDER[a.wateringStatus] - URGENCY_ORDER[b.wateringStatus])
+  // Sort by most urgent across both watering and fertilizing.
+  cards.sort((a, b) => {
+    const aUrgency = Math.min(URGENCY_ORDER[a.wateringStatus], URGENCY_ORDER[a.fertilizingStatus])
+    const bUrgency = Math.min(URGENCY_ORDER[b.wateringStatus], URGENCY_ORDER[b.fertilizingStatus])
+    return aUrgency - bUrgency
+  })
 
   // ── Streak ─────────────────────────────────────────────────────────────
   const oneYearAgo = new Date()
@@ -115,15 +131,36 @@ export default async function TodayPage() {
     ? (() => {
         const p = plants.find(pl => pl.id === latest.plant_id)
         if (!p) return null
+        const coverPhoto = coverPhotoMap.get(p.id)
         return {
           plantId: p.id,
           plantNickname: p.nickname,
           plantSpecies: p.species,
           createdAt: latest.created_at,
           health: latest.health,
+          coverPhotoUrl: coverPhoto ? getPhotoUrl(coverPhoto.storage_path) : null,
         }
       })()
     : null
 
-  return <TodayClient cards={cards} streak={streak} journalPeek={journalPeek} />
+  // Count distinct plants that received any care log today (local midnight).
+  const todayMidnight = new Date()
+  todayMidnight.setHours(0, 0, 0, 0)
+  const tendedToday = new Set(
+    (careLogs ?? []).filter(l => new Date(l.logged_at) >= todayMidnight).map(l => l.plant_id)
+  ).size
+
+  // 14-day activity set: which local-date strings have at least one care log.
+  const logDateSet = new Set<string>()
+  for (const log of careLogs ?? []) {
+    const d = new Date(log.logged_at)
+    logDateSet.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`)
+  }
+  const activityDays = Array.from(logDateSet)
+
+  // Count care logs in the last 7 days for the weekly summary.
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000)
+  const weeklyLogs = (careLogs ?? []).filter(l => new Date(l.logged_at) >= sevenDaysAgo).length
+
+  return <TodayClient cards={cards} streak={streak} journalPeek={journalPeek} tendedToday={tendedToday} activityDays={activityDays} weeklyLogs={weeklyLogs} />
 }

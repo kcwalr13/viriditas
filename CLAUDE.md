@@ -61,16 +61,17 @@ viriditas/
       settings/
         page.tsx             # Me — identity, sign out, about
   components/
-    Icon.tsx                # <Icon name="drop"/> — 39 single-stroke SVGs; replaces all emoji
+    Icon.tsx                # <Icon name="drop"/> — 40 single-stroke SVGs; replaces all emoji
     PlantPhoto.tsx          # Warm blocky gradient placeholder when no cover photo (deterministic from name)
     ui.tsx                  # StatusPip, Chip, BigTitle, SectionLabel, HairlineButton
     BottomNav.tsx           # Floating pill nav: Today / Plants / Explore / Me
+    NavGuard.tsx            # Wraps BottomNav — hides it on /plant/[id] and /add-plant
   lib/
     supabase/
       client.ts             # Browser Supabase client
       server.ts             # Server Supabase client (reads cookies)
     types.ts                # Plant, PlantPhoto, CareLog, AnalysisResult, SpeciesProfile
-    utils.ts                # formatDate, fileToBase64, computeWateringStatus, computeStreak, CARE_LOG_LABELS, URGENCY_ORDER
+    utils.ts                # formatDate, relativeTime, fileToBase64, computeWateringStatus, computeFertilizingStatus, computeStreak, computeMaxStreak, CARE_LOG_LABELS, URGENCY_ORDER
     notifications.ts        # Stub — web push not supported; no-op exports
   supabase/
     functions/
@@ -95,25 +96,26 @@ viriditas/
 - [x] `middleware.ts` + `lib/supabase/{client,server}.ts` — auth-gates `/(app)` and refreshes session cookies
 - [x] `app/(auth)/sign-in/page.tsx` and `sign-up/page.tsx` — email/password auth
 - [x] **Editorial Botanical redesign (2026-04-18)** — palette, custom icon set, and screen overhauls applied to every `/(app)` route. See "Editorial Design System" section below.
-- [x] `app/(app)/layout.tsx` — paper-bg protected shell + `<BottomNav/>` (Today / Plants / Explore / Me)
+- [x] `app/(app)/layout.tsx` — paper-bg protected shell + `<NavGuard/>` (renders BottomNav only on routes that need it)
 - [x] `app/(app)/page.tsx` + `TodayClient.tsx` — Today home: masthead greeting, streak strip, overdue/due-soon task list, collection carousel, AI journal peek
-- [x] `app/(app)/plants/page.tsx` + `PlantsClient.tsx` — Collection: grid/list toggle, group by all/location/status
-- [x] `app/(app)/plant/[id]/page.tsx` — Plant Detail: single-scroll editorial layout (hero, status strip, AI diagnosis card, log book, dossier, schedule, species guide, photo strip, floating care dock). All data fetched client-side.
+- [x] `app/(app)/plants/page.tsx` + `PlantsClient.tsx` — Collection: grid/list toggle, group by all/location/status/tag, care filter chips (all/urgent/due-soon/healthy), quick-log water/feed from grid, sort by urgency/A-Z/neglected
+- [x] `app/(app)/plant/[id]/page.tsx` — Plant Detail: single-scroll editorial layout (hero carousel + lightbox, status strip, AI diagnosis card, log book with filter tabs, dossier, watering + fertilizing schedule, species guide, photo strip, floating care dock). All data fetched client-side. Includes photo ZIP export via `jszip`.
 - [x] `app/(app)/add-plant/page.tsx` — Add Plant: 3-step wizard (identify → place → schedule). Step 1 uses `identify-species` for AI photo ID; plant row is created at step 3 submit.
 - [x] `app/(app)/explore/page.tsx` — Field Guide: AI Identify hero, category grid, featured carousel, recently-viewed (localStorage), text + photo search into species detail
 - [x] `app/(app)/settings/page.tsx` — Me: identity card, sign out, about
-- [x] `components/Icon.tsx` — 39 single-stroke SVGs replacing every emoji in the UI
+- [x] `components/Icon.tsx` — 40 single-stroke SVGs replacing every emoji in the UI (added: `ruler`)
 - [x] `components/ui.tsx` — BigTitle, SectionLabel, Chip, StatusPip, HairlineButton
 - [x] `components/BottomNav.tsx` — floating pill with route-based active state
+- [x] `components/NavGuard.tsx` — wraps BottomNav, hides on `/plant/[id]` and `/add-plant`
 - [x] `components/PlantPhoto.tsx` — warm blocky gradient placeholder when a plant has no cover photo
-- [x] `lib/types.ts` — Plant, PlantPhoto, CareLog, AnalysisResult, SpeciesProfile types
-- [x] `lib/utils.ts` — formatDate, formatTimestamp, toLocalDateStr, fileToBase64, computeWateringStatus, computeStreak, CARE_LOG_LABELS, URGENCY_ORDER
+- [x] `lib/types.ts` — Plant (+ fertilizing_interval_days, soil_type, tags, pest_notes, last_treatment_date), PlantPhoto, CareLog (+ measured type), AnalysisResult (+ health_score), SpeciesProfile (+ seasonal_care)
+- [x] `lib/utils.ts` — formatDate, formatTimestamp, relativeTime, toLocalDateStr, fileToBase64, computeWateringStatus, computeFertilizingStatus, computeStreak, computeMaxStreak, CARE_LOG_LABELS, URGENCY_ORDER
 - [x] Supabase schema, RLS, and Edge Functions (see schema section below)
 - [x] `scripts/patch-ua-parser.js` — prebuild patch so middleware works in Vercel Edge Runtime
-- [x] Vercel deployment — auto-deploys on push to `main`; framework preset: Next.js; output: default
+- [x] Vercel deployment — auto-deploys on push to `main`; production URL: https://viriditas-three.vercel.app/
 - [x] `supabase/functions/identify-species` — species from base64 photo (no storage)
 - [x] `supabase/functions/suggest-species` — 4-6 candidates for a freeform query
-- [x] `species_profiles` table — includes `pruning_tips`, `disease_symptoms`; prompts request bullet-formatted content
+- [x] `species_profiles` table — includes `pruning_tips`, `disease_symptoms`, `seasonal_care`; prompts request bullet-formatted content
 
 ## What Comes Next
 See `ROADMAP_CURRENT.md` for known gaps, priorities, and suggested next steps.
@@ -178,14 +180,14 @@ Fonts are loaded from Google Fonts in `app/globals.css` with a preconnect in `ap
 ### Placeholder imagery (`components/PlantPhoto.tsx`)
 Plants without cover photos show a warm blocky gradient. Colors are deterministic from the plant's id or nickname (`paletteFor(key)`), so the same plant always gets the same hue. Used for both grid cards and placeholder hero images.
 
-### Bottom nav (`components/BottomNav.tsx`)
-Floating pill with four tabs: **Today / Plants / Explore / Me**. Active tab shows the label; inactive tabs show just the icon. Route matching: `/plant/[id]` and `/add-plant` highlight **Plants**.
+### Bottom nav (`components/BottomNav.tsx` + `NavGuard.tsx`)
+Floating pill with four tabs: **Today / Plants / Explore / Me**. Active tab shows the label; inactive tabs show just the icon. Route matching: `/plant/[id]` and `/add-plant` highlight **Plants**. The layout renders `<NavGuard/>` which hides the nav entirely on Plant Detail and Add Plant screens.
 
 ### Screen conventions
 - **Masthead pattern:** every top-level screen opens with a mono caption ("Vol. I · Saturday, April 18" style) then a `<BigTitle/>` with an italic-accent tail — e.g. "Good morning. *2 plants need you.*"
 - **Section numbers:** screens use `§ 01`, `§ 02`, `§ —` to number sections like a field guide.
 - **Scroll rails:** horizontal carousels use the `vr-scroll` class (hides the scrollbar). See `app/globals.css`.
-- **Bottom dock** (Plant Detail only): fixed care-action pill above the bottom nav. **Note:** the current implementation stacks the dock with the global bottom nav, which is cluttered — follow-up task in ROADMAP Phase 14 to hide the nav on plant detail.
+- **Bottom dock** (Plant Detail only): fixed care-action pill that floats at the bottom of the screen. The global `<BottomNav/>` is hidden on `/plant/[id]` via `<NavGuard/>`, so the dock is the only bottom element on that screen.
 
 ## Coding Conventions
 - Use TypeScript (`.tsx` for files with JSX, `.ts` for pure logic); no `any` types
@@ -211,7 +213,9 @@ Floating pill with four tabs: **Today / Plants / Explore / Me**. Active tab show
 `plants`
 - id, user_id, nickname, species (nullable), location (nullable), pot_size (nullable)
 - acquired_date (nullable, YYYY-MM-DD), last_repotted_date (nullable, YYYY-MM-DD)
-- notes (nullable), watering_interval_days (nullable int), created_at
+- notes (nullable), watering_interval_days (nullable int), fertilizing_interval_days (nullable int)
+- soil_type (nullable), tags (text[] default '{}'), pest_notes (nullable), last_treatment_date (nullable, YYYY-MM-DD)
+- created_at
 
 `photos`
 - id, plant_id, user_id, storage_path, created_at
@@ -222,6 +226,7 @@ Floating pill with four tabs: **Today / Plants / Explore / Me**. Active tab show
 `analysis_results`
 - id, plant_id, user_id, photo_id (nullable), species (nullable)
 - **health** (nullable) — 2-3 sentence health assessment from the AI
+- **health_score** (nullable int, 1–5) — numeric health rating; null for pre-Phase-12A analyses
 - **care** (nullable) — 2-3 actionable care recommendations from the AI
 - created_at
 
@@ -229,9 +234,10 @@ Floating pill with four tabs: **Today / Plants / Explore / Me**. Active tab show
 - id, species_name (unique), common_names (nullable), scientific_name (nullable)
 - light, watering, humidity, temperature, soil, toxicity
 - common_problems, growth_habits, propagation
+- pruning_tips (nullable), disease_symptoms (nullable), seasonal_care (nullable)
 - fetched_at, updated_at
 
-**care_logs type constraint** — allowed values: `watered`, `fertilized`, `note`, `repotted`, `pruned`, `misted`, `pest_treatment`, `moved`. To add new types:
+**care_logs type constraint** — allowed values: `watered`, `fertilized`, `note`, `repotted`, `pruned`, `misted`, `pest_treatment`, `moved`, `measured`. To add new types:
 ```sql
 ALTER TABLE care_logs DROP CONSTRAINT IF EXISTS care_logs_type_check;
 ALTER TABLE care_logs ADD CONSTRAINT care_logs_type_check CHECK (type IN (...all values...));
@@ -249,6 +255,7 @@ ALTER TABLE care_logs ADD CONSTRAINT care_logs_type_check CHECK (type IN (...all
 - AI API keys live in Supabase secrets only — never in Next.js env files
 
 ### Vercel Deployment
+- Production URL: **https://viriditas-three.vercel.app/**
 - Framework Preset must be **Next.js** (not "Other") — this was a migration gotcha
 - Output Directory must be **default** (not overridden to "dist") — that was an Expo-era leftover
 - Every push to `main` triggers a new production deployment automatically
@@ -307,15 +314,16 @@ ALTER TABLE care_logs ADD CONSTRAINT care_logs_type_check CHECK (type IN (...all
 - Using only `plant.species` will make species-dependent UI appear broken even after a successful analysis
 
 ### Urgency and Care Status
-- Plant watering status computed from `watering_interval_days` + most recent `watered` care log
-- `overdue`: days since last watering > interval; `due-soon`: within 1 day of interval; `good`: more than 1 day left; `unset`: no interval configured
-- Sort order: `{ overdue: 0, 'due-soon': 1, good: 2, unset: 3 }` — stable sort preserves creation order within tiers
-- `lib/utils.ts` exports `computeWateringStatus()`, `URGENCY_ORDER`, and `WateringStatus` type
+- Both **watering** and **fertilizing** have independent status tracking using the same logic
+- Status is computed from an interval (days) + the most recent relevant care log
+- `overdue`: days since last care > interval; `due-soon`: within 1 day of interval; `good`: more than 1 day left; `unset`: no interval configured
+- Sort order: `{ overdue: 0, 'due-soon': 1, good: 2, unset: 3 }` — plants sort by their most urgent status across both watering and fertilizing
+- `lib/utils.ts` exports `computeWateringStatus()`, `computeFertilizingStatus` (alias), `URGENCY_ORDER`, and `WateringStatus` type
 
 ### Care Streak Computation
 - Counts consecutive local calendar days (ending today or yesterday) with any care log entry
 - If today has no care yet, streak is still "alive" if yesterday was logged
-- `lib/utils.ts` exports `computeStreak(logTimestamps: string[])`
+- `lib/utils.ts` exports `computeStreak(logTimestamps: string[])` (current streak) and `computeMaxStreak()` (all-time best)
 
 ### Enriching Plant List Data Efficiently
 - Fetch plants, then fetch photos and care_logs with `.in('plant_id', plantIds)` — 3 total queries regardless of collection size
@@ -327,6 +335,13 @@ ALTER TABLE care_logs ADD CONSTRAINT care_logs_type_check CHECK (type IN (...all
 - This is because the screen is highly interactive (uploads, care logs, AI analysis, edit mode) and needs real-time state
 - The pattern: `useEffect(() => { loadAll() }, [id])` triggers a full refresh when the plant ID changes
 - A second `useEffect` watches `plant?.species || latestAnalysis?.species` and triggers species profile lookup when species becomes known
+
+### NavGuard Pattern
+- `components/NavGuard.tsx` is a client component that wraps `<BottomNav/>` and hides it on certain routes
+- Used in `app/(app)/layout.tsx` in place of `<BottomNav/>` directly
+- Currently hidden on: `/add-plant` (full-screen wizard) and any path starting with `/plant/` (has its own care dock)
+- To add a new route that should hide the nav: add it to the `HIDDEN_ROUTES` array in `NavGuard.tsx`
+- This avoids the `usePathname()` hook living in the Server Component layout (it can only run in Client Components)
 
 ### Explore / Encyclopedia Screen
 - `app/(app)/explore/page.tsx` — Client Component; all state managed locally

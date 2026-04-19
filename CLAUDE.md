@@ -365,3 +365,18 @@ When adding a new field to one of these context types, update three places: the 
 - **`FormattedContent` component**: renders species profile text with smart formatting — lines starting with `• ` or `- ` become bullet lists; double-newline separation becomes paragraphs; plain text falls back gracefully
 - **Bullet formatting in profiles**: `fetch-species-info` prompt requests `\n• ` bullet format for multi-item fields; existing cached entries won't have bullets until refreshed
 - **"Back to results" button**: shown on profile view when there are suggestions in state; clears profile and re-displays the grid without a new API call
+
+## Versioning Convention
+
+The app version lives in **`package.json`** (`"version"` field) and is the single source of truth. The Settings screen imports it at build time via `import pkg from '@/package.json'`.
+
+Use **semantic versioning** (MAJOR.MINOR.PATCH):
+- **MAJOR** (`1.x.x`) — stays at 1 until a breaking data-schema change or full redesign
+- **MINOR** (`x.N.x`) — bump once per session that ships user-facing features; each meaningful feature session = +1
+- **PATCH** (`x.x.N`) — bump for bug-fix-only sessions (no new user-visible features)
+
+**History:**
+- `1.0.0` — initial release: core screens (Today, Plants, Plant Detail, Add Plant, Explore, Me), Editorial design system, AI edge functions
+- `1.1.0` — NavGuard, Plants collection enhancements, Plant Detail v2 (carousel, lightbox, fertilizing schedule, tags/soil/pest edit, Measure action, ZIP export)
+- `1.2.0` — Phase 15: structured journaling (NoteCategory, MeasurementUnit, category picker, measurement picker, expanded AI context)
+- `1.3.0` — P1/P2 backlog: password reset, storage cleanup on delete, re-analyze gate, species cache invalidation, log pagination, Quick Add Note sheet, streak strip navigation, Add Plant autocomplete, Explore real categories

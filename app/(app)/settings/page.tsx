@@ -7,6 +7,7 @@ import { useState, useEffect } from 'react'
 import { BigTitle, SectionLabel } from '@/components/ui'
 import { Icon } from '@/components/Icon'
 import { computeStreak, computeMaxStreak, relativeTime } from '@/lib/utils'
+import pkg from '@/package.json'
 
 export default function MePage() {
   const router   = useRouter()
@@ -279,7 +280,7 @@ export default function MePage() {
         </div>
         <div className="flex items-center justify-between px-4 py-3.5 border-b border-dashed border-rule">
           <span className="font-mono text-[10px] tracking-[0.12em] uppercase text-ink-muted">Version</span>
-          <span className="font-mono text-[12px] text-ink-soft">1.0.0</span>
+          <span className="font-mono text-[12px] text-ink-soft">{pkg.version}</span>
         </div>
         <div className="px-4 py-4">
           <p className="font-serif text-[14px] text-ink leading-relaxed" style={{ textWrap: 'pretty' as React.CSSProperties['textWrap'] }}>

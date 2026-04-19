@@ -19,7 +19,7 @@ import {
   CARE_LOG_LABELS,
   computeStreak,
 } from '@/lib/utils'
-import type { Plant, PlantPhoto, CareLog, AnalysisResult, SpeciesProfile } from '@/lib/types'
+import type { Plant, PlantPhoto, CareLog, AnalysisResult, SpeciesProfile, NoteCategory, MeasurementUnit } from '@/lib/types'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { useState, useEffect, useRef, useCallback } from 'react'
@@ -49,6 +49,20 @@ const MORE_ACTIONS: CareAction[] = [
 ]
 
 const REMINDER_OPTIONS = [3, 5, 7, 10, 14, 21]
+
+// Structured note categories (Phase 15 — Gap 4). Maps each NoteCategory to an
+// icon so the category picker reads as a field-guide taxonomy, not a mood wheel.
+const NOTE_CATEGORIES: Array<{ key: NoteCategory; label: string; icon: IconName }> = [
+  { key: 'growth',      label: 'Growth',      icon: 'leaf'    },
+  { key: 'pest',        label: 'Pest',        icon: 'bug'     },
+  { key: 'environment', label: 'Environment', icon: 'sun'     },
+  { key: 'concern',     label: 'Concern',     icon: 'warning' },
+  { key: 'general',     label: 'General',     icon: 'edit'    },
+]
+
+// Unit options for `measured` logs (Phase 15 — Gap 6). Short allowlist keeps
+// the AI trend comparison reliable (no unit conversion needed to compare).
+const MEASURE_UNITS: MeasurementUnit[] = ['cm', 'in', 'mm', 'ft', 'leaves', 'stems', 'flowers', 'pups']
 
 // Timeline item — care logs + analyses merged by date
 type TimelineItem =
@@ -88,7 +102,6 @@ export default function PlantDetailPage() {
   const [timelineFilter,    setTimelineFilter]    = useState<'all' | 'care' | 'notes' | 'analysis'>('all')
   const [showAllTimeline,   setShowAllTimeline]   = useState(false)
   const [showMeasureInput,  setShowMeasureInput]  = useState(false)
-  const [measureText,       setMeasureText]       = useState('')
   const [editing,           setEditing]           = useState(false)
   const [saving,          setSaving]        = useState(false)
   const [deleting,        setDeleting]      = useState(false)
@@ -108,9 +121,14 @@ export default function PlantDetailPage() {
   const [lastTreatmentDate, setLastTreatmentDate] = useState('')
 
   // ── Diary note state ──────────────────────────────────────────────────
-  const [noteCondition,    setNoteCondition]    = useState('')
+  const [noteCategory,     setNoteCategory]     = useState<NoteCategory | null>(null)
   const [downloadingZip,   setDownloadingZip]   = useState(false)
   const [lightboxIndex,    setLightboxIndex]    = useState<number | null>(null)
+
+  // ── Measurement state ─────────────────────────────────────────────────
+  const [measureValue,     setMeasureValue]     = useState('')
+  const [measureUnit,      setMeasureUnit]      = useState<MeasurementUnit>('cm')
+  const [measureNote,      setMeasureNote]      = useState('')
 
   // ── Toast state ───────────────────────────────────────────────────────
   const [toast, setToast] = useState<{ message: string; key: number } | null>(null)
@@ -252,13 +270,27 @@ export default function PlantDetailPage() {
   }
 
   // ── Care logging ──────────────────────────────────────────────────────
-  async function logCare(type: CareType, customNote?: string) {
+  async function logCare(
+    type: CareType,
+    customNote?: string | null,
+    extras?: {
+      category?: NoteCategory | null
+      measurement_value?: number | null
+      measurement_unit?: MeasurementUnit | null
+    }
+  ) {
     setLoggingCare(true)
     setError(null)
     try {
       const { data: { user } } = await supabase.auth.getUser()
       const { error } = await supabase.from('care_logs').insert({
-        plant_id: id, user_id: user!.id, type, notes: customNote ?? null,
+        plant_id: id,
+        user_id: user!.id,
+        type,
+        notes: customNote ?? null,
+        category:          extras?.category          ?? null,
+        measurement_value: extras?.measurement_value ?? null,
+        measurement_unit:  extras?.measurement_unit  ?? null,
       })
       if (error) throw error
 
@@ -275,12 +307,9 @@ export default function PlantDetailPage() {
 
   async function handleNoteSubmit() {
     if (!noteText.trim()) return
-    const fullNote = noteCondition
-      ? `${noteCondition} — ${noteText.trim()}`
-      : noteText.trim()
-    await logCare('note', fullNote)
+    await logCare('note', noteText.trim(), { category: noteCategory ?? 'general' })
     setNoteText('')
-    setNoteCondition('')
+    setNoteCategory(null)
     setShowNoteInput(false)
   }
 
@@ -399,25 +428,40 @@ export default function PlantDetailPage() {
       const imageUrl = supabase.storage.from('plant-photos').getPublicUrl(latestPhoto.storage_path).data.publicUrl
 
       const previousAnalyses = allAnalyses.slice(0, 3).map(r => ({
-        date: new Date(r.created_at).toLocaleDateString(),
-        species: r.species, health: r.health, care: r.care,
+        date:         new Date(r.created_at).toLocaleDateString(),
+        species:      r.species,
+        health:       r.health,
+        health_score: r.health_score,   // Gap 5 — trend data
+        care:         r.care,            // Gap 3 — prior recommendations
       }))
       const recentCareLogs = careLogs.slice(0, 10).map(l => ({
-        type: l.type, notes: l.notes, date: new Date(l.logged_at).toLocaleDateString(),
+        type: l.type,
+        notes: l.notes,
+        date: new Date(l.logged_at).toLocaleDateString(),
+        category:          l.category,            // Gap 4
+        measurement_value: l.measurement_value,   // Gap 6
+        measurement_unit:  l.measurement_unit,    // Gap 6
       }))
 
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) throw new Error('Not logged in')
 
       const now = new Date()
+      const hasPlantContext =
+        plant?.location || plant?.pot_size || plant?.soil_type ||
+        plant?.notes || plant?.pest_notes || plant?.last_treatment_date
+
       const { data, error: fnError } = await supabase.functions.invoke('analyze-plant', {
         body: {
           imageUrl, previousAnalyses, recentCareLogs,
-          speciesProfile: speciesProfile ?? null,
-          plantContext: (plant?.location || plant?.pot_size || plant?.soil_type) ? {
-            location:  plant?.location  ?? null,
-            pot_size:  plant?.pot_size  ?? null,
-            soil_type: plant?.soil_type ?? null,
+          speciesProfile: speciesProfile ?? null,  // whole row — now carries pruning_tips, disease_symptoms, seasonal_care
+          plantContext: hasPlantContext ? {
+            location:            plant?.location            ?? null,
+            pot_size:            plant?.pot_size            ?? null,
+            soil_type:           plant?.soil_type           ?? null,
+            plant_notes:         plant?.notes               ?? null,   // Gap 2
+            pest_notes:          plant?.pest_notes          ?? null,   // Gap 2
+            last_treatment_date: plant?.last_treatment_date ?? null,   // Gap 2
           } : null,
           seasonContext: { month: now.getMonth() + 1, hemisphere: 'northern' },
         },
@@ -1024,19 +1068,20 @@ export default function PlantDetailPage() {
             <div className="font-mono text-[10px] tracking-[0.14em] uppercase text-ink-muted mb-2.5">
               Observation
             </div>
-            {/* Condition chips */}
+            {/* Structured note categories (Gap 4) */}
             <div className="flex flex-wrap gap-1.5 mb-3">
-              {['All good', 'New growth', 'Showing stress', 'Pest spotted', 'Recovering', 'Flowering'].map(c => (
+              {NOTE_CATEGORIES.map(c => (
                 <button
-                  key={c}
-                  onClick={() => setNoteCondition(prev => prev === c ? '' : c)}
-                  className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
-                    noteCondition === c
+                  key={c.key}
+                  onClick={() => setNoteCategory(prev => prev === c.key ? null : c.key)}
+                  className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors inline-flex items-center gap-1 ${
+                    noteCategory === c.key
                       ? 'bg-ink text-paper border-ink'
                       : 'bg-transparent text-ink-soft border-rule'
                   }`}
                 >
-                  {c}
+                  <Icon name={c.icon} size={11} stroke={1.9} />
+                  {c.label}
                 </button>
               ))}
             </div>
@@ -1050,7 +1095,7 @@ export default function PlantDetailPage() {
             />
             <div className="flex gap-2 mt-2.5">
               <button
-                onClick={() => { setShowNoteInput(false); setNoteText(''); setNoteCondition('') }}
+                onClick={() => { setShowNoteInput(false); setNoteText(''); setNoteCategory(null) }}
                 className="flex-1 py-2 rounded-full border border-rule text-ink-soft text-[13px] font-medium"
               >
                 Cancel
@@ -1067,38 +1112,66 @@ export default function PlantDetailPage() {
         )}
       </div>
 
-      {/* ── Measure input ─────────────────────────────────────────────── */}
+      {/* ── Measure input (Gap 6 — structured numeric + unit) ─────────── */}
       {showMeasureInput && (
         <div className="mx-5 mt-3 bg-card border border-rule rounded-brand-lg p-4">
           <div className="font-mono text-[10px] tracking-[0.14em] uppercase text-ink-muted mb-2">
             Record measurement
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 mb-2.5">
             <input
-              type="text"
-              inputMode="text"
-              value={measureText}
-              onChange={e => setMeasureText(e.target.value)}
-              placeholder="e.g. 42cm, 18in, 3 new leaves"
+              type="number"
+              step="0.1"
+              inputMode="decimal"
+              value={measureValue}
+              onChange={e => setMeasureValue(e.target.value)}
+              placeholder="42"
               autoFocus
-              className="flex-1 px-3.5 py-2.5 border border-rule rounded-brand text-[13px] bg-paper text-ink"
+              className="w-24 px-3 py-2.5 border border-rule rounded-brand text-[13px] bg-paper text-ink tabular-nums"
             />
+            <div className="flex flex-wrap gap-1.5">
+              {MEASURE_UNITS.map(u => (
+                <button
+                  key={u}
+                  onClick={() => setMeasureUnit(u)}
+                  className={`px-2.5 py-1 rounded-full text-[11px] font-medium border transition-colors ${
+                    measureUnit === u
+                      ? 'bg-ink text-paper border-ink'
+                      : 'bg-transparent text-ink-soft border-rule'
+                  }`}
+                >
+                  {u}
+                </button>
+              ))}
+            </div>
           </div>
+          <input
+            type="text"
+            value={measureNote}
+            onChange={e => setMeasureNote(e.target.value)}
+            placeholder="Optional — what did you measure? (e.g. tallest stem)"
+            className="w-full px-3 py-2.5 border border-rule rounded-brand text-[13px] bg-paper text-ink"
+          />
           <div className="flex gap-2 mt-2.5">
             <button
-              onClick={() => { setShowMeasureInput(false); setMeasureText('') }}
+              onClick={() => { setShowMeasureInput(false); setMeasureValue(''); setMeasureNote('') }}
               className="flex-1 py-2 rounded-full border border-rule text-ink-soft text-[13px] font-medium"
             >
               Cancel
             </button>
             <button
               onClick={async () => {
-                if (!measureText.trim()) return
-                await logCare('measured', measureText.trim())
-                setMeasureText('')
+                const v = parseFloat(measureValue)
+                if (!Number.isFinite(v)) return
+                await logCare('measured', measureNote.trim() || null, {
+                  measurement_value: v,
+                  measurement_unit:  measureUnit,
+                })
+                setMeasureValue('')
+                setMeasureNote('')
                 setShowMeasureInput(false)
               }}
-              disabled={!measureText.trim() || loggingCare}
+              disabled={!Number.isFinite(parseFloat(measureValue)) || loggingCare}
               className="flex-1 py-2 bg-ink text-paper rounded-full text-[13px] font-medium disabled:opacity-50"
             >
               Save
@@ -1113,10 +1186,13 @@ export default function PlantDetailPage() {
         title={`Log book${careLogs.length > 0 ? ` — ${careLogs.length}` : ''}`}
         action={careLogs.length > 0 ? 'Export CSV' : undefined}
         onAction={() => {
-          const header = 'Date,Type,Notes\n'
-          const rows = careLogs.map(l =>
-            `"${new Date(l.logged_at).toLocaleString()}","${l.type}","${(l.notes ?? '').replace(/"/g, '""')}"`
-          ).join('\n')
+          const header = 'Date,Type,Category,Measurement,Unit,Notes\n'
+          const rows = careLogs.map(l => {
+            const dt       = new Date(l.logged_at).toLocaleString()
+            const notesCsv = (l.notes ?? '').replace(/"/g, '""')
+            const meas     = l.measurement_value !== null ? String(l.measurement_value) : ''
+            return `"${dt}","${l.type}","${l.category ?? ''}","${meas}","${l.measurement_unit ?? ''}","${notesCsv}"`
+          }).join('\n')
           const blob = new Blob([header + rows], { type: 'text/csv' })
           const url = URL.createObjectURL(blob)
           const a = document.createElement('a')
@@ -1808,8 +1884,20 @@ function HistoryRow({ item, isLast, onDelete, onEditNote, photoUrl }: { item: Ti
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex justify-between items-baseline gap-2">
-          <span className="font-sans font-medium text-[13px] text-ink tracking-[-0.01em] capitalize">
+          <span className="font-sans font-medium text-[13px] text-ink tracking-[-0.01em] capitalize inline-flex items-baseline gap-1.5">
             {item.kind === 'analysis' ? 'AI analysis' : CARE_LOG_LABELS[item.data.type] || item.data.type}
+            {/* Category badge for structured notes (Gap 4) */}
+            {item.kind === 'care' && item.data.type === 'note' && item.data.category && (
+              <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-paper-alt text-ink-muted uppercase tracking-[0.08em]">
+                {item.data.category}
+              </span>
+            )}
+            {/* Structured measurement value (Gap 6) */}
+            {item.kind === 'care' && item.data.type === 'measured' && item.data.measurement_value !== null && (
+              <span className="font-mono text-[11px] text-accent font-semibold tabular-nums">
+                {item.data.measurement_value}{item.data.measurement_unit ? ` ${item.data.measurement_unit}` : ''}
+              </span>
+            )}
           </span>
           <span className="font-mono text-[10px] text-ink-muted tracking-[0.04em] shrink-0">
             {formatTimestamp(item.date)}
@@ -1854,7 +1942,14 @@ function HistoryRow({ item, isLast, onDelete, onEditNote, photoUrl }: { item: Ti
           </>
         )}
         {item.kind === 'care' && item.data.type === 'measured' && item.data.notes && (
-          <div className="font-mono text-[13px] text-accent font-semibold mt-0.5">{item.data.notes}</div>
+          // Structured measurements show value in the title badge; notes here are
+          // optional context ("tallest stem"). Legacy measured rows use this to
+          // display the full free-text measurement ("42cm tall").
+          <div className={`mt-0.5 ${
+            item.data.measurement_value !== null
+              ? 'text-[12px] text-ink-soft'
+              : 'font-mono text-[13px] text-accent font-semibold'
+          }`}>{item.data.notes}</div>
         )}
         {item.kind === 'care' && item.data.type === 'note' && (
           editing ? (

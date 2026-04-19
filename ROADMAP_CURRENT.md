@@ -190,7 +190,27 @@ ALTER TABLE species_profiles
 ALTER TABLE care_logs DROP CONSTRAINT IF EXISTS care_logs_type_check;
 ALTER TABLE care_logs ADD CONSTRAINT care_logs_type_check
   CHECK (type IN ('watered','fertilized','note','repotted','pruned','misted','pest_treatment','moved','measured'));
+
+-- Phase 15 — structured journaling fields on care_logs (Gaps 4 & 6)
+ALTER TABLE care_logs
+  ADD COLUMN IF NOT EXISTS category text,
+  ADD COLUMN IF NOT EXISTS measurement_value numeric,
+  ADD COLUMN IF NOT EXISTS measurement_unit text;
+
+ALTER TABLE care_logs DROP CONSTRAINT IF EXISTS care_logs_category_check;
+ALTER TABLE care_logs ADD CONSTRAINT care_logs_category_check
+  CHECK (category IS NULL OR category IN ('growth','pest','environment','concern','general'));
+
+ALTER TABLE care_logs DROP CONSTRAINT IF EXISTS care_logs_measurement_unit_check;
+ALTER TABLE care_logs ADD CONSTRAINT care_logs_measurement_unit_check
+  CHECK (measurement_unit IS NULL OR measurement_unit IN ('cm','in','mm','ft','leaves','stems','flowers','pups'));
+
+CREATE INDEX IF NOT EXISTS idx_care_logs_plant_category
+  ON care_logs (plant_id, category)
+  WHERE category IS NOT NULL;
 ```
+
+> **Note:** All Phase 15 columns are nullable with no default. Legacy `note` rows render without a category badge; legacy `measured` rows keep their free-text in `notes` and display unchanged. Backfilling 'general' to existing notes is intentionally avoided — it would mislead the AI into treating uncategorized observations as deliberately tagged.
 
 ---
 
@@ -203,6 +223,17 @@ ALTER TABLE care_logs ADD CONSTRAINT care_logs_type_check
 - Full type system update — Plant, CareLog, AnalysisResult, SpeciesProfile all updated with new fields
 - `computeFertilizingStatus`, `computeMaxStreak`, `relativeTime` utilities added
 - ESLint/TypeScript build errors fixed for clean Vercel deploy
+
+**Phase 15 — Journal & AI context expansion (this session):**
+- **Gap 1:** `analyze-plant` now sends `pruning_tips`, `disease_symptoms`, `seasonal_care` from species profile
+- **Gap 2:** `plant.notes`, `pest_notes`, `last_treatment_date` now reach the AI as `plantContext`
+- **Gap 3:** Previous analyses now pass their `care` recommendations back so the AI can reflect on whether owners followed prior advice
+- **Gap 4:** Notes get a structured `category` (growth / pest / environment / concern / general) — replaces the freeform "condition" mood chips
+- **Gap 5:** `health_score` now travels in `previousAnalyses` so the AI can describe trend; sparkline UI in the Diagnosis card was already in place
+- **Gap 6:** `measured` logs gain structured `measurement_value` + `measurement_unit` (cm/in/mm/ft/leaves/stems/flowers/pups) for true growth-rate tracking
+- Timeline renderer shows category badges on notes and value pills on measurements
+- CSV export expanded to include category, measurement, unit columns
+- New SQL migration block above (run on Supabase before deploying)
 
 **Production:** https://viriditas-three.vercel.app/
 **Test account:** uitester@viriditas.dev / Viriditas2026!

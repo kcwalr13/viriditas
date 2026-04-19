@@ -28,13 +28,17 @@ type PreviousAnalysis = {
   date: string
   species: string | null
   health: string | null
-  care: string | null
+  health_score: number | null   // Gap 5 — lets AI reference trend
+  care: string | null            // Gap 3 — lets AI reflect on prior recommendations
 }
 
 type CareLogEntry = {
   type: string
   notes: string | null
   date: string
+  category?: 'growth' | 'pest' | 'environment' | 'concern' | 'general' | null   // Gap 4
+  measurement_value?: number | null   // Gap 6
+  measurement_unit?: string | null    // Gap 6
 }
 
 type SpeciesProfileContext = {
@@ -44,13 +48,19 @@ type SpeciesProfileContext = {
   humidity?: string | null
   temperature?: string | null
   common_problems?: string | null
+  pruning_tips?: string | null       // Gap 1
+  disease_symptoms?: string | null   // Gap 1
+  seasonal_care?: string | null      // Gap 1
   [key: string]: string | null | undefined
 }
 
 type PlantContext = {
   location?: string | null
   pot_size?: string | null
-  soil_type?: string | null   // e.g. "aroid mix" — affects watering frequency advice (Phase 12C)
+  soil_type?: string | null             // e.g. "aroid mix" — affects watering frequency advice (Phase 12C)
+  plant_notes?: string | null           // Gap 2 — freeform owner notes from plants.notes
+  pest_notes?: string | null            // Gap 2 — pest history from plants.pest_notes
+  last_treatment_date?: string | null   // Gap 2 — YYYY-MM-DD
 }
 
 type SeasonContext = {
@@ -77,15 +87,21 @@ function buildPrompt(
 - Watering: ${speciesProfile.watering ?? 'unknown'}
 - Humidity: ${speciesProfile.humidity ?? 'unknown'}
 - Temperature: ${speciesProfile.temperature ?? 'unknown'}
-- Common problems: ${speciesProfile.common_problems ?? 'unknown'}`
+- Common problems: ${speciesProfile.common_problems ?? 'unknown'}
+- Disease & pest symptoms to watch for: ${speciesProfile.disease_symptoms ?? 'unknown'}
+- Pruning guidance: ${speciesProfile.pruning_tips ?? 'unknown'}
+- Seasonal care notes: ${speciesProfile.seasonal_care ?? 'unknown'}`
     : ''
 
   const contextParts: string[] = []
-  if (plantContext?.location)  contextParts.push(`- Location: ${plantContext.location}`)
-  if (plantContext?.pot_size)  contextParts.push(`- Pot size: ${plantContext.pot_size}`)
-  if (plantContext?.soil_type) contextParts.push(`- Soil type: ${plantContext.soil_type}`)
+  if (plantContext?.location)            contextParts.push(`- Location: ${plantContext.location}`)
+  if (plantContext?.pot_size)            contextParts.push(`- Pot size: ${plantContext.pot_size}`)
+  if (plantContext?.soil_type)           contextParts.push(`- Soil type: ${plantContext.soil_type}`)
+  if (plantContext?.plant_notes)         contextParts.push(`- Owner's notes on this plant: ${plantContext.plant_notes}`)
+  if (plantContext?.pest_notes)          contextParts.push(`- Pest history: ${plantContext.pest_notes}`)
+  if (plantContext?.last_treatment_date) contextParts.push(`- Most recent pest treatment: ${plantContext.last_treatment_date}`)
   const plantContextSection = contextParts.length > 0
-    ? `\nPlant context:\n${contextParts.join('\n')}\nFactor this into your recommendations — reference the specific conditions of their location, and let soil type inform watering frequency advice.`
+    ? `\nPlant context:\n${contextParts.join('\n')}\nFactor this into your recommendations — reference the specific conditions of their location, let soil type inform watering frequency advice, and take pest history seriously when interpreting what you see in the photo.`
     : ''
 
   // Seasonal context: lets the AI give season-appropriate advice and flag
@@ -106,18 +122,26 @@ function buildPrompt(
 
   const historySection = hasHistory
     ? `\nPrevious analysis history (most recent first):
-${previousAnalyses.map(a =>
-  `[${a.date}] Species: ${a.species ?? 'unknown'}. Health: ${a.health ?? 'not recorded'}.`
-).join('\n')}
-Compare what you observe now against this history and note whether the plant is improving, stable, or declining.`
+${previousAnalyses.map(a => {
+  const score = a.health_score !== null ? ` Score: ${a.health_score}/5.` : ''
+  const care  = a.care ? ` Previous recommendations: ${a.care}` : ''
+  return `[${a.date}] Species: ${a.species ?? 'unknown'}. Health: ${a.health ?? 'not recorded'}.${score}${care}`
+}).join('\n')}
+Compare what you observe now against this history. If scores are trending up, affirm the progress; if trending down, flag it and adjust recommendations accordingly. Where a previous analysis made specific recommendations, use the recent care log below as evidence of whether the owner followed them — and comment on whether those actions appear to have helped.`
     : ''
 
   const careSection = hasCare
     ? `\nRecent care log:
-${recentCareLogs.map(l =>
-  `[${l.date}] ${l.type}${l.notes ? `: ${l.notes}` : ''}`
-).join('\n')}
-Factor this care history into your assessment — if the plant was recently watered, don't recommend watering unless there's a clear need.`
+${recentCareLogs.map(l => {
+  let line = `[${l.date}] ${l.type}`
+  if (l.type === 'note' && l.category) line += ` (${l.category})`
+  if (l.type === 'measured' && l.measurement_value !== null && l.measurement_value !== undefined) {
+    line += ` — ${l.measurement_value}${l.measurement_unit ? ' ' + l.measurement_unit : ''}`
+  }
+  if (l.notes) line += `: ${l.notes}`
+  return line
+}).join('\n')}
+Factor this care history into your assessment. If the plant was recently watered, don't recommend watering unless there's a clear need. Treat 'note' entries as first-person owner observations — the category tag in parentheses indicates what the owner was focused on (growth, pest, environment, concern, general). Treat 'measured' entries as objective trend data: compare successive values to assess growth rate and flag stagnation or acceleration.`
     : ''
 
   const healthInstruction = hasHistory

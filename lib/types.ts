@@ -28,6 +28,14 @@ export type PlantPhoto = {
   created_at: string
 }
 
+// Structured note categorization (Phase 15 — Gap 4). Applies only to `note` logs.
+// Legacy rows carry null; UI renders them without a category badge.
+export type NoteCategory = 'growth' | 'pest' | 'environment' | 'concern' | 'general'
+
+// Allowed units for `measured` logs (Phase 15 — Gap 6). Legacy rows carry null
+// on both value+unit and keep their free-text in `notes`.
+export type MeasurementUnit = 'cm' | 'in' | 'mm' | 'ft' | 'leaves' | 'stems' | 'flowers' | 'pups'
+
 export type CareLog = {
   id: string
   plant_id: string
@@ -35,10 +43,13 @@ export type CareLog = {
   // Primary actions (shown in the main quick-action bar):
   //   watered, fertilized, note
   // Secondary actions (shown in the expandable "More" row):
-  //   repotted, pruned, misted, pest_treatment, moved
+  //   repotted, pruned, misted, pest_treatment, moved, measured
   type: 'watered' | 'fertilized' | 'note' | 'repotted' | 'pruned' | 'misted' | 'pest_treatment' | 'moved' | 'measured'
   notes: string | null
   logged_at: string
+  category: NoteCategory | null
+  measurement_value: number | null
+  measurement_unit: MeasurementUnit | null
 }
 
 export type AnalysisResult = {

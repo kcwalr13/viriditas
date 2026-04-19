@@ -53,7 +53,8 @@ Respond with a JSON object in exactly this format — no extra text, no markdown
   "growth_habits": "Growth characteristics — 2–3 sentences or bullets covering size at maturity, growth rate, and notable growth pattern.",
   "propagation": "Propagation methods in bullet format:\n• [Method]: brief steps",
   "pruning_tips": "Pruning guidance in bullet format:\n• When to prune (season or growth stage)\n• What to remove and why\n• How to make clean cuts",
-  "disease_symptoms": "Visual symptoms to watch for in bullet format — one bullet per condition:\n• [Disease/Pest/Deficiency]: what it looks like and how to treat it"
+  "disease_symptoms": "Visual symptoms to watch for in bullet format — one bullet per condition:\n• [Disease/Pest/Deficiency]: what it looks like and how to treat it",
+  "seasonal_care": "How care needs shift across seasons in bullet format:\n• Spring: growth resumes — what to adjust\n• Summer: peak growth — watering and feeding notes\n• Autumn: slow-down — what to reduce\n• Winter: dormancy or rest — watering, light, and temperature notes"
 }
 
 IMPORTANT: Within each JSON string value, use '\\n• ' (newline + bullet) to separate distinct points where bullet format is requested above. This makes the content easy to read in the app.

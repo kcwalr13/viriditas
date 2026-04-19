@@ -1,7 +1,6 @@
 // components/ui.tsx
 // Shared UI primitives — StatusPip, Chip, BigTitle, SectionLabel,
-// HairlineButton, Scroll. These are the editorial building blocks used
-// across every screen.
+// HairlineButton. These are the editorial building blocks used across every screen.
 import type { ReactNode } from 'react'
 import type { WateringStatus } from '@/lib/utils'
 import { Icon, type IconName } from './Icon'
@@ -125,14 +124,3 @@ export function HairlineButton({
   )
 }
 
-// ─── Scroll ─────────────────────────────────────────────────────────────
-// Full-height scroll container that hides its scrollbar (for in-phone rails).
-// Not strictly needed on a real web app but preserves the design intent
-// for horizontal carousels.
-export function Scroll({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return (
-    <div className={`vr-scroll h-full overflow-y-auto overflow-x-hidden ${className}`} style={{ WebkitOverflowScrolling: 'touch' }}>
-      {children}
-    </div>
-  )
-}

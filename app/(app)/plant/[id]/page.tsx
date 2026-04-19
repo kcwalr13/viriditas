@@ -65,6 +65,7 @@ export default function PlantDetailPage() {
   const [plant,          setPlant]          = useState<Plant | null>(null)
   const [photos,         setPhotos]         = useState<PlantPhoto[]>([])
   const [careLogs,       setCareLogs]       = useState<CareLog[]>([])
+  const [lastWateredLog, setLastWateredLog] = useState<CareLog | null>(null)
   const [latestAnalysis, setLatestAnalysis] = useState<AnalysisResult | null>(null)
   const [allAnalyses,    setAllAnalyses]    = useState<AnalysisResult[]>([])
   const [speciesProfile, setSpeciesProfile] = useState<SpeciesProfile | null>(null)
@@ -159,7 +160,7 @@ export default function PlantDetailPage() {
 
   async function loadAll() {
     setLoading(true)
-    await Promise.all([fetchPlant(), fetchPhotos(), fetchCareLogs(), fetchAnalyses()])
+    await Promise.all([fetchPlant(), fetchPhotos(), fetchCareLogs(), fetchLastWatered(), fetchAnalyses()])
     setLoading(false)
   }
 
@@ -189,6 +190,11 @@ export default function PlantDetailPage() {
   async function fetchCareLogs() {
     const { data } = await supabase.from('care_logs').select('*').eq('plant_id', id).order('logged_at', { ascending: false }).limit(50)
     if (data) setCareLogs(data)
+  }
+
+  async function fetchLastWatered() {
+    const { data } = await supabase.from('care_logs').select('*').eq('plant_id', id).eq('type', 'watered').order('logged_at', { ascending: false }).limit(1)
+    setLastWateredLog(data?.[0] ?? null)
   }
 
   async function fetchAnalyses() {
@@ -258,7 +264,7 @@ export default function PlantDetailPage() {
 
       const label = type === 'note' ? 'Note saved' : CARE_LOG_LABELS[type]
       showToast(label)
-      if (type === 'watered') router.refresh()
+      if (type === 'watered') { await fetchLastWatered(); router.refresh() }
       await fetchCareLogs()
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Could not save care log.')
@@ -530,7 +536,7 @@ export default function PlantDetailPage() {
   const speciesFromAI = !plant.species && !!latestAnalysis?.species
   const heroPhoto = photos[0]
 
-  const lastWatered    = careLogs.find(l => l.type === 'watered')
+  const lastWatered    = lastWateredLog
   const lastFertilized = careLogs.find(l => l.type === 'fertilized')
 
   const daysSinceWatered = lastWatered

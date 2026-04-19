@@ -156,3 +156,19 @@ export const URGENCY_ORDER: Record<WateringStatus, number> = {
   good:      2,
   unset:     3,
 }
+
+// ── File helpers ─────────────────────────────────────────────────────────────
+
+// Reads a File and returns the raw base64 string (without the data: URI prefix).
+// Used when sending images to Edge Functions that accept base64.
+export function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const res = reader.result as string
+      resolve(res.includes(',') ? res.split(',')[1] : res)
+    }
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}

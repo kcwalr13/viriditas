@@ -14,7 +14,7 @@
 //   Upload/snap → identify-species → fetch-species-info → species detail
 
 import { createClient } from '@/lib/supabase/client'
-import { formatTimestamp, relativeTime } from '@/lib/utils'
+import { fileToBase64, formatTimestamp, relativeTime } from '@/lib/utils'
 import type { SpeciesProfile } from '@/lib/types'
 import { useEffect, useRef, useState } from 'react'
 import { BigTitle, HairlineButton, SectionLabel } from '@/components/ui'
@@ -803,15 +803,6 @@ function FormattedContent({ text }: { text: string }) {
 }
 
 // ─── helpers ───────────────────────────────────────────────────────────
-
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve((reader.result as string).split(',')[1])
-    reader.onerror = reject
-    reader.readAsDataURL(file)
-  })
-}
 
 function shortPreview(text: string | null): string {
   if (!text) return '—'

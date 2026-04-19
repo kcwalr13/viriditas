@@ -385,7 +385,7 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
         number={nextSec()}
         title={`Your collection — ${cards.length}`}
         action="See all"
-        onAction={() => { window.location.href = '/plants' }}
+        onAction={() => router.push('/plants')}
       />
       <div className="vr-scroll flex gap-2.5 px-5 overflow-x-auto pb-1" style={{ scrollSnapType: 'x mandatory' }}>
         {cards.map(card => (

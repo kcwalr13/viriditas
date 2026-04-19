@@ -9,6 +9,7 @@
 // The plant row is created at the end of step 3. If the user took a photo
 // in step 1, it's uploaded and attached to the new plant afterwards.
 import { createClient } from '@/lib/supabase/client'
+import { fileToBase64 } from '@/lib/utils'
 import { useRouter } from 'next/navigation'
 import { useRef, useState, useEffect } from 'react'
 import { BigTitle, Chip, HairlineButton } from '@/components/ui'
@@ -612,16 +613,3 @@ function Step3({
   )
 }
 
-// ─── helpers ────────────────────────────────────────────────────────────
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      const res = reader.result as string
-      // Strip the data URL prefix to get raw base64
-      resolve(res.includes(',') ? res.split(',')[1] : res)
-    }
-    reader.onerror = () => reject(reader.error)
-    reader.readAsDataURL(file)
-  })
-}

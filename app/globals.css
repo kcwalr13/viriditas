@@ -29,11 +29,31 @@ body {
 
 /* Subtle button press feedback */
 button:active { transform: scale(0.98); transition: transform 80ms ease; }
-button:focus, input:focus, textarea:focus { outline: none; }
 
-/* Toast notification — slides up and fades in */
+/* Remove the default browser outline — we provide our own via :focus-visible.
+   :focus-visible only fires for keyboard navigation, not mouse clicks,
+   so mouse users never see a ring while keyboard users always do. */
+button:focus,
+input:focus,
+textarea:focus,
+select:focus,
+a:focus      { outline: none; }
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+a:focus-visible {
+  outline: 2px solid #4C6A48;   /* accent olive */
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Toast notification — slides up and fades in.
+   The container owns the x-centering (left-1/2 -translate-x-1/2);
+   the toast itself only needs a y-slide. */
 @keyframes toastIn {
-  from { opacity: 0; transform: translateX(-50%) translateY(6px); }
-  to   { opacity: 1; transform: translateX(-50%) translateY(0);   }
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0);   }
 }
 .toast-enter { animation: toastIn 0.18s ease-out forwards; }

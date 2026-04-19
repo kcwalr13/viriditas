@@ -63,14 +63,14 @@ viriditas/
   components/
     Icon.tsx                # <Icon name="drop"/> — 39 single-stroke SVGs; replaces all emoji
     PlantPhoto.tsx          # Warm blocky gradient placeholder when no cover photo (deterministic from name)
-    ui.tsx                  # StatusPip, Chip, BigTitle, SectionLabel, HairlineButton, Scroll
+    ui.tsx                  # StatusPip, Chip, BigTitle, SectionLabel, HairlineButton
     BottomNav.tsx           # Floating pill nav: Today / Plants / Explore / Me
   lib/
     supabase/
       client.ts             # Browser Supabase client
       server.ts             # Server Supabase client (reads cookies)
     types.ts                # Plant, PlantPhoto, CareLog, AnalysisResult, SpeciesProfile
-    utils.ts                # formatDate, computeWateringStatus, computeStreak, CARE_LOG_LABELS, URGENCY_ORDER
+    utils.ts                # formatDate, fileToBase64, computeWateringStatus, computeStreak, CARE_LOG_LABELS, URGENCY_ORDER
     notifications.ts        # Stub — web push not supported; no-op exports
   supabase/
     functions/
@@ -107,7 +107,7 @@ viriditas/
 - [x] `components/BottomNav.tsx` — floating pill with route-based active state
 - [x] `components/PlantPhoto.tsx` — warm blocky gradient placeholder when a plant has no cover photo
 - [x] `lib/types.ts` — Plant, PlantPhoto, CareLog, AnalysisResult, SpeciesProfile types
-- [x] `lib/utils.ts` — formatDate, formatTimestamp, toLocalDateStr, computeWateringStatus, computeStreak, CARE_LOG_LABELS, URGENCY_ORDER
+- [x] `lib/utils.ts` — formatDate, formatTimestamp, toLocalDateStr, fileToBase64, computeWateringStatus, computeStreak, CARE_LOG_LABELS, URGENCY_ORDER
 - [x] Supabase schema, RLS, and Edge Functions (see schema section below)
 - [x] `scripts/patch-ua-parser.js` — prebuild patch so middleware works in Vercel Edge Runtime
 - [x] Vercel deployment — auto-deploys on push to `main`; framework preset: Next.js; output: default
@@ -116,7 +116,7 @@ viriditas/
 - [x] `species_profiles` table — includes `pruning_tips`, `disease_symptoms`; prompts request bullet-formatted content
 
 ## What Comes Next
-See ROADMAP.md for the full feature breakdown and phase plan.
+See `ROADMAP_CURRENT.md` for known gaps, priorities, and suggested next steps.
 
 ## Plant Profile Architecture
 Each plant has two layers of information:

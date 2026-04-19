@@ -91,7 +91,7 @@ export default function MePage() {
         if (months >= 1) setOldestPlant({ nickname: oldest.nickname, months })
       }
     })
-  }, [supabase])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleExport() {
     setExporting(true)

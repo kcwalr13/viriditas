@@ -79,7 +79,7 @@ export default function AddPlantPage() {
       setManualSpeciesOpen(true)
       setStep(2)
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [])
 
   // ── Step 1: photo + identify ──────────────────────────────────────────
   async function handlePhotoSelected(e: React.ChangeEvent<HTMLInputElement>) {

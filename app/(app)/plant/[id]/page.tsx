@@ -534,8 +534,6 @@ export default function PlantDetailPage() {
 
   const knownSpecies = plant.species || latestAnalysis?.species
   const speciesFromAI = !plant.species && !!latestAnalysis?.species
-  const heroPhoto = photos[0]
-
   const lastWatered    = lastWateredLog
   const lastFertilized = careLogs.find(l => l.type === 'fertilized')
 

@@ -109,12 +109,12 @@ export default function PlantsClient({ cards }: { cards: PlantCard[] }) {
       })
     }
     return filtered
-  }, [cards, searchQuery, activeTagFilters, sortBy])
+  }, [cards, searchQuery, activeTagFilters, sortBy, careFilter])
 
   function toggleTagFilter(tag: string) {
     setActiveTagFilters(prev => {
       const next = new Set(prev)
-      next.has(tag) ? next.delete(tag) : next.add(tag)
+      if (next.has(tag)) { next.delete(tag) } else { next.add(tag) }
       return next
     })
   }

@@ -37,6 +37,7 @@ export default function AddPlantPage() {
   const [speciesConfirmed, setSpeciesConfirmed] = useState(false)
   const [manualSpecies, setManualSpecies] = useState('')
   const [manualSpeciesOpen, setManualSpeciesOpen] = useState(false)
+  const [manualSpeciesSuggestions, setManualSpeciesSuggestions] = useState<string[]>([])
 
   // Step 2 state
   const [nickname, setNickname] = useState('')
@@ -80,6 +81,24 @@ export default function AddPlantPage() {
       setStep(2)
     }
   }, [])
+
+  // Debounced autocomplete: search species_profiles as the user types the
+  // manual species name. Only fires after 300ms of no input; clears on short/empty queries.
+  useEffect(() => {
+    if (!manualSpecies || manualSpecies.length < 2) {
+      setManualSpeciesSuggestions([])
+      return
+    }
+    const timer = setTimeout(async () => {
+      const { data } = await supabase
+        .from('species_profiles')
+        .select('species_name')
+        .ilike('species_name', `%${manualSpecies}%`)
+        .limit(6)
+      setManualSpeciesSuggestions((data ?? []).map(d => d.species_name as string))
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [manualSpecies]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Step 1: photo + identify ──────────────────────────────────────────
   async function handlePhotoSelected(e: React.ChangeEvent<HTMLInputElement>) {
@@ -220,8 +239,10 @@ export default function AddPlantPage() {
             onTakePhoto={() => fileInputRef.current?.click()}
             manualSpeciesOpen={manualSpeciesOpen}
             manualSpecies={manualSpecies}
-            setManualSpecies={setManualSpecies}
+            setManualSpecies={s => { setManualSpecies(s); setManualSpeciesSuggestions([]) }}
             onOpenManual={() => setManualSpeciesOpen(true)}
+            suggestions={manualSpeciesSuggestions}
+            onSuggestionSelect={name => { setManualSpecies(name); setManualSpeciesSuggestions([]) }}
           />
         )}
         {step === 2 && (
@@ -282,6 +303,7 @@ function Step1({
   photoPreview, identifying, result, speciesConfirmed,
   onConfirm, onReset, onTakePhoto,
   manualSpeciesOpen, manualSpecies, setManualSpecies, onOpenManual,
+  suggestions, onSuggestionSelect,
 }: {
   photoPreview: string | null
   identifying: boolean
@@ -294,6 +316,8 @@ function Step1({
   manualSpecies: string
   setManualSpecies: (s: string) => void
   onOpenManual: () => void
+  suggestions: string[]
+  onSuggestionSelect: (name: string) => void
 }) {
   return (
     <div className="px-5 pt-2">
@@ -371,7 +395,7 @@ function Step1({
 
       {/* Manual species fallback */}
       {manualSpeciesOpen ? (
-        <div className="mt-4">
+        <div className="mt-4 relative">
           <label className="font-mono text-[10px] tracking-[0.14em] uppercase text-ink-muted">
             Species name
           </label>
@@ -380,8 +404,23 @@ function Step1({
             value={manualSpecies}
             onChange={e => setManualSpecies(e.target.value)}
             placeholder="e.g. Monstera deliciosa"
-            className="mt-1.5 w-full px-3.5 py-3 border border-rule rounded-brand bg-card text-[14px] text-ink"
+            className="mt-1.5 w-full px-3.5 py-3 border border-rule rounded-brand bg-card text-[14px] text-ink focus:outline-none focus:ring-1 focus:ring-accent"
           />
+          {/* Autocomplete dropdown from cached species_profiles */}
+          {suggestions.length > 0 && (
+            <div className="absolute left-0 right-0 top-full mt-1 z-10 bg-card border border-rule rounded-brand shadow-lg overflow-hidden">
+              {suggestions.map(name => (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => onSuggestionSelect(name)}
+                  className="w-full px-3.5 py-2.5 text-left text-[13px] text-ink hover:bg-paper-alt border-b border-rule last:border-0 font-serif italic"
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       ) : (
         <button

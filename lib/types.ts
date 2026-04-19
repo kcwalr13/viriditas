@@ -17,6 +17,10 @@ export type Plant = {
   tags: string[]                    // freeform tag strings, e.g. ["rare", "propagation"]
   pest_notes: string | null         // free-text notes on pest history
   last_treatment_date: string | null // date of most recent pest treatment
+  // is_name_verified is true when the user has manually confirmed/corrected the
+  // species name; false (or absent) when it came from AI identification only.
+  // Migration required before this persists: see ROADMAP_CURRENT.md
+  is_name_verified?: boolean
   created_at: string
 }
 

@@ -6,12 +6,21 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { useMemo, useState, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { BigTitle, SectionLabel, StatusPip } from '@/components/ui'
+import { BigTitle, SectionLabel, StatusPip, HairlineButton } from '@/components/ui'
 import { Icon } from '@/components/Icon'
 import { PlantPhoto } from '@/components/PlantPhoto'
 import { relativeTime } from '@/lib/utils'
 import { createClient } from '@/lib/supabase/client'
+import type { NoteCategory } from '@/lib/types'
 import type { PlantCard, JournalPeek } from './page'
+
+const NOTE_CATEGORIES: Array<{ key: NoteCategory; label: string }> = [
+  { key: 'growth',      label: 'Growth'      },
+  { key: 'pest',        label: 'Pest'        },
+  { key: 'environment', label: 'Environment' },
+  { key: 'concern',     label: 'Concern'     },
+  { key: 'general',     label: 'General'     },
+]
 
 interface Props {
   cards: PlantCard[]
@@ -35,6 +44,13 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
   const [loggingId, setLoggingId] = useState<string | null>(null)
   const [bulkLogging, setBulkLogging] = useState(false)
   const [toast, setToast] = useState<{ message: string; key: number } | null>(null)
+
+  // Quick add-note sheet state
+  const [showAddNote,  setShowAddNote]  = useState(false)
+  const [notePlantId,  setNotePlantId]  = useState('')
+  const [noteText,     setNoteText]     = useState('')
+  const [noteCategory, setNoteCategory] = useState<NoteCategory | null>(null)
+  const [addingNote,   setAddingNote]   = useState(false)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const showToast = useCallback((message: string) => {
@@ -143,6 +159,34 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
     }
   }
 
+  // Insert a care_log note for any plant in the collection.
+  async function quickAddNote() {
+    if (!notePlantId || !noteText.trim()) return
+    setAddingNote(true)
+    try {
+      const supabase = createClient()
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session) return
+      await supabase.from('care_logs').insert({
+        plant_id: notePlantId,
+        user_id: session.user.id,
+        type: 'note',
+        notes: noteText.trim(),
+        category: noteCategory ?? null,
+        logged_at: new Date().toISOString(),
+      })
+      const plantName = cards.find(c => c.plant.id === notePlantId)?.plant.nickname ?? 'plant'
+      showToast(`Note added · ${plantName}`)
+      setShowAddNote(false)
+      setNoteText('')
+      setNoteCategory(null)
+      setNotePlantId('')
+      router.refresh()
+    } finally {
+      setAddingNote(false)
+    }
+  }
+
   // ── Empty state (no plants yet) ───────────────────────────────────────
   if (cards.length === 0) {
     return <EmptyState />
@@ -183,7 +227,7 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
 
       {/* ── Streak strip ──────────────────────────────────────────────── */}
       {streak > 0 && (
-        <Link href="/plants" className="mx-5 mt-3.5 flex items-center gap-3 px-3.5 py-3 bg-paper-alt border border-rule rounded-brand">
+        <Link href="/settings" className="mx-5 mt-3.5 flex items-center gap-3 px-3.5 py-3 bg-paper-alt border border-rule rounded-brand">
           <div className="w-[34px] h-[34px] rounded-full bg-accent flex items-center justify-center shrink-0">
             <Icon name="flame" size={18} stroke={1.8} className="text-paper" />
           </div>
@@ -384,8 +428,8 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
       <SectionLabel
         number={nextSec()}
         title={`Your collection — ${cards.length}`}
-        action="See all"
-        onAction={() => router.push('/plants')}
+        action="+ Note"
+        onAction={() => setShowAddNote(true)}
       />
       <div className="vr-scroll flex gap-2.5 px-5 overflow-x-auto pb-1" style={{ scrollSnapType: 'x mandatory' }}>
         {cards.map(card => (
@@ -473,6 +517,88 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
             </div>
           </Link>
         </>
+      )}
+
+      {/* ── Add note bottom sheet ────────────────────────────────────── */}
+      {showAddNote && (
+        <div
+          className="fixed inset-0 z-40 flex flex-col justify-end"
+          style={{ background: 'rgba(0,0,0,0.4)' }}
+          onClick={() => setShowAddNote(false)}
+        >
+          <div
+            className="bg-card rounded-t-2xl border-t border-rule p-5 pb-10 max-h-[85vh] overflow-y-auto"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="font-serif italic text-[22px] text-ink">Add a note</h2>
+              <button onClick={() => setShowAddNote(false)} className="w-8 h-8 flex items-center justify-center rounded-full bg-paper-alt">
+                <Icon name="close" size={16} stroke={2} className="text-ink-muted" />
+              </button>
+            </div>
+
+            {/* Plant picker */}
+            <div className="mb-4">
+              <label className="block font-mono text-[10px] tracking-[0.14em] uppercase text-ink-muted mb-1.5">
+                Plant
+              </label>
+              <select
+                value={notePlantId}
+                onChange={e => setNotePlantId(e.target.value)}
+                className="w-full px-3.5 py-3 border border-rule rounded-brand bg-paper text-[13px] text-ink focus:outline-none focus:ring-1 focus:ring-accent"
+              >
+                <option value="">Select a plant…</option>
+                {cards.map(c => (
+                  <option key={c.plant.id} value={c.plant.id}>{c.plant.nickname}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Note text */}
+            <div className="mb-4">
+              <label className="block font-mono text-[10px] tracking-[0.14em] uppercase text-ink-muted mb-1.5">
+                Note
+              </label>
+              <textarea
+                value={noteText}
+                onChange={e => setNoteText(e.target.value)}
+                placeholder="What did you observe?"
+                rows={3}
+                className="w-full px-3.5 py-3 border border-rule rounded-brand bg-paper text-[13px] text-ink resize-none focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+            </div>
+
+            {/* Category chips */}
+            <div className="mb-5">
+              <label className="block font-mono text-[10px] tracking-[0.14em] uppercase text-ink-muted mb-2">
+                Category (optional)
+              </label>
+              <div className="flex gap-1.5 flex-wrap">
+                {NOTE_CATEGORIES.map(cat => (
+                  <button
+                    key={cat.key}
+                    onClick={() => setNoteCategory(noteCategory === cat.key ? null : cat.key)}
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-mono border transition-colors ${
+                      noteCategory === cat.key
+                        ? 'bg-ink text-paper border-ink'
+                        : 'bg-transparent text-ink-soft border-rule'
+                    }`}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <HairlineButton
+              onClick={quickAddNote}
+              fullWidth
+              disabled={addingNote || !notePlantId || !noteText.trim()}
+            >
+              {addingNote ? 'Saving…' : 'Save note'}
+            </HairlineButton>
+          </div>
+        </div>
       )}
 
       {/* ── Toast ─────────────────────────────────────────────────────── */}

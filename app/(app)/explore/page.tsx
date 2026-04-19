@@ -30,13 +30,15 @@ interface Suggestion extends SuggestionBase {
   thumbnailUrl: string | null
 }
 
+// Categories drive both the browse grid AND the suggest-species search query.
+// searchQuery is passed to the AI — kept as common plant-world terms.
 const CATEGORIES = [
-  { name: 'Beginner-friendly',    subtitle: 'Hard to kill' },
-  { name: 'Low light',            subtitle: 'For dim corners' },
-  { name: 'Pet-safe',             subtitle: 'Non-toxic varieties' },
-  { name: 'Trailing & climbing',  subtitle: 'Vines and cascaders' },
-  { name: 'Blooming houseplants', subtitle: 'Colour indoors' },
-  { name: 'Desert & succulent',   subtitle: 'Drought tolerant' },
+  { name: 'Tropical',            subtitle: 'Lush leafy specimens',  searchQuery: 'tropical houseplant' },
+  { name: 'Succulents & Cacti',  subtitle: 'Drought tolerant',      searchQuery: 'succulent cactus'    },
+  { name: 'Ferns & Mosses',      subtitle: 'Lovers of humidity',    searchQuery: 'fern moss terrarium'  },
+  { name: 'Trailing vines',      subtitle: 'Cascaders & climbers',  searchQuery: 'trailing vine pothos' },
+  { name: 'Flowering',           subtitle: 'Colour indoors',        searchQuery: 'flowering houseplant' },
+  { name: 'Low light',           subtitle: 'For dim corners',       searchQuery: 'low light tolerant'   },
 ]
 
 const FEATURED = [
@@ -87,6 +89,8 @@ export default function ExplorePage() {
   const [userPlants, setUserPlants] = useState<Array<{ id: string; nickname: string; species: string | null }>>([])
   // When arriving via ?species= deep link, "back" should navigate to the previous page.
   const [deepLinked, setDeepLinked] = useState(false)
+  // Real counts of cached species per category keyword
+  const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({})
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { setRecent(loadRecent()) }, [])
@@ -121,6 +125,24 @@ export default function ExplorePage() {
       } catch { /* gradient fallback */ }
     })
   }, [recent]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load species counts per category from the local species_profiles cache.
+  // This shows how many species the AI has already profiled in each browse area.
+  useEffect(() => {
+    async function loadCounts() {
+      const counts: Record<string, number> = {}
+      await Promise.all(CATEGORIES.map(async cat => {
+        const keyword = cat.searchQuery.split(' ')[0] // use first keyword for DB ilike match
+        const { count } = await supabase
+          .from('species_profiles')
+          .select('*', { count: 'exact', head: true })
+          .or(`species_name.ilike.%${keyword}%,common_names.ilike.%${keyword}%`)
+        counts[cat.name] = count ?? 0
+      }))
+      setCategoryCounts(counts)
+    }
+    loadCounts()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch Wikipedia thumbnails for the featured carousel once on mount.
   useEffect(() => {
@@ -380,10 +402,11 @@ export default function ExplorePage() {
           <div className="grid grid-cols-2 gap-2 px-5">
             {CATEGORIES.map((c, i) => {
               const [tp, bt] = paletteFor(c.name)
+              const count = categoryCounts[c.name]
               return (
                 <button
                   key={c.name}
-                  onClick={() => { setNameQuery(c.name); fetchSuggestions(c.name) }}
+                  onClick={() => { setNameQuery(c.searchQuery); fetchSuggestions(c.searchQuery) }}
                   className="relative overflow-hidden p-3.5 bg-card border border-rule rounded-brand text-left flex flex-col gap-5 h-[120px]"
                 >
                   <div
@@ -395,6 +418,9 @@ export default function ExplorePage() {
                   />
                   <div className="font-mono text-[10px] text-ink-muted tracking-[0.1em] relative">
                     N° {String(i + 1).padStart(2, '0')}
+                    {count != null && count > 0 && (
+                      <span className="ml-1.5 text-ink-muted">· {count}</span>
+                    )}
                   </div>
                   <div className="relative mt-auto">
                     <div className="font-serif italic text-[16px] text-ink leading-tight tracking-[-0.01em]">

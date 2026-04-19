@@ -93,6 +93,7 @@ export default function PlantDetailPage() {
   const [noteText,        setNoteText]      = useState('')
   const [showMore,        setShowMore]      = useState(false)
   const [analyzing,       setAnalyzing]     = useState(false)
+  const [analyzeGated,    setAnalyzeGated]  = useState(false)
   const [fetchingSpecies, setFetchingSpecies] = useState(false)
   const [savingReminder,      setSavingReminder]      = useState(false)
   const [savingFertilizing,   setSavingFertilizing]   = useState(false)
@@ -100,7 +101,8 @@ export default function PlantDetailPage() {
   const [selectedForCompare,  setSelectedForCompare]  = useState<Set<string>>(new Set())
   const [speciesOpen,       setSpeciesOpen]       = useState(false)
   const [timelineFilter,    setTimelineFilter]    = useState<'all' | 'care' | 'notes' | 'analysis'>('all')
-  const [showAllTimeline,   setShowAllTimeline]   = useState(false)
+  const [totalCareLogs,     setTotalCareLogs]     = useState(0)
+  const [loadingMoreLogs,   setLoadingMoreLogs]   = useState(false)
   const [showMeasureInput,  setShowMeasureInput]  = useState(false)
   const [editing,           setEditing]           = useState(false)
   const [saving,          setSaving]        = useState(false)
@@ -206,8 +208,27 @@ export default function PlantDetailPage() {
   }
 
   async function fetchCareLogs() {
-    const { data } = await supabase.from('care_logs').select('*').eq('plant_id', id).order('logged_at', { ascending: false }).limit(50)
+    const { data, count } = await supabase
+      .from('care_logs')
+      .select('*', { count: 'exact' })
+      .eq('plant_id', id)
+      .order('logged_at', { ascending: false })
+      .range(0, 19)
     if (data) setCareLogs(data)
+    setTotalCareLogs(count ?? 0)
+  }
+
+  async function loadMoreCareLogs() {
+    setLoadingMoreLogs(true)
+    const start = careLogs.length
+    const { data } = await supabase
+      .from('care_logs')
+      .select('*')
+      .eq('plant_id', id)
+      .order('logged_at', { ascending: false })
+      .range(start, start + 19)
+    if (data) setCareLogs(prev => [...prev, ...data])
+    setLoadingMoreLogs(false)
   }
 
   async function fetchLastWatered() {
@@ -491,6 +512,17 @@ export default function PlantDetailPage() {
     }
   }
 
+  // Confirmation gate: require a window.confirm before spending an AI credit,
+  // and block rapid double-taps with a 3s cooldown after each click.
+  function handleAnalyzeClick(targetPhoto?: PlantPhoto) {
+    if (analyzeGated || analyzing) return
+    const ok = window.confirm('This will use an AI credit. Continue?')
+    if (!ok) return
+    setAnalyzeGated(true)
+    setTimeout(() => setAnalyzeGated(false), 3000)
+    void handleAnalyze(targetPhoto)
+  }
+
   async function fetchSpeciesProfileFromAI(speciesName: string, forceRefresh = false) {
     setFetchingSpecies(true)
     setError(null)
@@ -516,9 +548,13 @@ export default function PlantDetailPage() {
     if (!nickname.trim()) { setError('Nickname cannot be empty.'); return }
     setSaving(true)
     setError(null)
+
+    const newSpecies       = editSpecies.trim() || null
+    const speciesChanged   = newSpecies !== (plant?.species ?? null)
+
     const { error } = await supabase.from('plants').update({
       nickname: nickname.trim(),
-      species: editSpecies.trim() || null,
+      species: newSpecies,
       location: location.trim() || null,
       pot_size: potSize.trim() || null,
       soil_type: soilType.trim() || null,
@@ -530,8 +566,15 @@ export default function PlantDetailPage() {
       last_treatment_date: lastTreatmentDate || null,
     }).eq('id', id)
 
-    if (error) { setError('Could not save changes.') }
-    else { setEditing(false); await fetchPlant() }
+    if (error) {
+      setError('Could not save changes.')
+    } else {
+      setEditing(false)
+      // When the user manually changes the species name, clear the cached
+      // species profile so it will be re-fetched for the corrected name.
+      if (speciesChanged) setSpeciesProfile(null)
+      await fetchPlant()
+    }
     setSaving(false)
   }
 
@@ -541,6 +584,20 @@ export default function PlantDetailPage() {
     )
     if (!ok) return
     setDeleting(true)
+
+    // Remove storage files before deleting the plant row (cascade removes the photos
+    // table rows but leaves the actual files in Supabase Storage as orphans).
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      const { data: files } = await supabase.storage
+        .from('plant-photos')
+        .list(`${user.id}/${id}`)
+      if (files && files.length > 0) {
+        const paths = files.map(f => `${user.id}/${id}/${f.name}`)
+        await supabase.storage.from('plant-photos').remove(paths)
+      }
+    }
+
     await supabase.from('plants').delete().eq('id', id)
     router.push('/plants')
   }
@@ -940,8 +997,8 @@ export default function PlantDetailPage() {
             )}
           </div>
           <button
-            onClick={() => void handleAnalyze()}
-            disabled={analyzing || photos.length === 0}
+            onClick={() => handleAnalyzeClick()}
+            disabled={analyzing || analyzeGated || photos.length === 0}
             className={`text-[11px] font-medium inline-flex items-center gap-1 disabled:opacity-40 ${
               analysisStale ? 'text-warn' : 'text-accent'
             }`}
@@ -965,7 +1022,7 @@ export default function PlantDetailPage() {
                 Add a photo
               </HairlineButton>
             ) : (
-              <HairlineButton icon="sparkle" onClick={() => void handleAnalyze()} fullWidth={false}>
+              <HairlineButton icon="sparkle" onClick={() => handleAnalyzeClick()} fullWidth={false}>
                 Analyze plant
               </HairlineButton>
             )}
@@ -1219,7 +1276,7 @@ export default function PlantDetailPage() {
               {(['all', 'care', 'notes', 'analysis'] as const).map(f => (
                 <button
                   key={f}
-                  onClick={() => { setTimelineFilter(f); setShowAllTimeline(false) }}
+                  onClick={() => setTimelineFilter(f)}
                   className={`px-2.5 py-1 rounded-full text-[11px] font-mono border transition-colors ${
                     timelineFilter === f
                       ? 'bg-ink text-paper border-ink'
@@ -1240,8 +1297,6 @@ export default function PlantDetailPage() {
             if (timelineFilter === 'analysis') return item.kind === 'analysis'
             return true
           })
-          const limit = showAllTimeline ? filtered.length : 20
-          const visible = filtered.slice(0, limit)
 
           if (filtered.length === 0) return (
             <div className="bg-card border border-rule rounded-brand p-5 text-center">
@@ -1249,11 +1304,16 @@ export default function PlantDetailPage() {
               <p className="text-xs text-ink-muted mt-1">Tap the dock below to log your first care action.</p>
             </div>
           )
+
+          // Remaining care logs on the server beyond what's already loaded.
+          // Analyses are always fully loaded; only care_logs are paginated.
+          const remainingOnServer = Math.max(0, totalCareLogs - careLogs.length)
+
           return (
             <>
-              {visible.map((item, i) => {
+              {filtered.map((item, i) => {
                 const itemMonth = new Date(item.date).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
-                const prevMonth = i > 0 ? new Date(visible[i - 1].date).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) : null
+                const prevMonth = i > 0 ? new Date(filtered[i - 1].date).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) : null
                 const showMonthSep = prevMonth !== null && itemMonth !== prevMonth
                 return (
                   <React.Fragment key={item.id}>
@@ -1266,7 +1326,7 @@ export default function PlantDetailPage() {
                     )}
                     <HistoryRow
                       item={item}
-                      isLast={i === visible.length - 1 && (showAllTimeline || filtered.length <= limit)}
+                      isLast={i === filtered.length - 1 && remainingOnServer === 0}
                       onDelete={item.kind === 'care' ? () => handleDeleteCareLog(item.id) : undefined}
                       onEditNote={item.kind === 'care' && item.data.type === 'note' ? (text) => handleEditNoteLog(item.id, text) : undefined}
                       photoUrl={(() => {
@@ -1278,12 +1338,13 @@ export default function PlantDetailPage() {
                   </React.Fragment>
                 )
               })}
-              {!showAllTimeline && filtered.length > limit && (
+              {remainingOnServer > 0 && (
                 <button
-                  onClick={() => setShowAllTimeline(true)}
-                  className="w-full mt-2 py-2.5 text-[12px] text-accent font-medium font-mono tracking-[0.06em] uppercase"
+                  onClick={loadMoreCareLogs}
+                  disabled={loadingMoreLogs}
+                  className="w-full mt-2 py-2.5 text-[12px] text-accent font-medium font-mono tracking-[0.06em] uppercase disabled:opacity-40"
                 >
-                  See all {filtered.length} entries
+                  {loadingMoreLogs ? 'Loading…' : `Load more · ${remainingOnServer} remaining`}
                 </button>
               )}
             </>
@@ -1772,8 +1833,8 @@ export default function PlantDetailPage() {
             {/* Bottom actions */}
             <div className="flex items-center justify-center gap-3 py-6 shrink-0 flex-wrap px-5" onClick={e => e.stopPropagation()}>
               <button
-                onClick={() => { void handleAnalyze(photo); setLightboxIndex(null) }}
-                disabled={analyzing}
+                onClick={() => { handleAnalyzeClick(photo); setLightboxIndex(null) }}
+                disabled={analyzing || analyzeGated}
                 className="flex items-center gap-2 px-4 py-2.5 rounded-full text-[13px] font-medium text-paper disabled:opacity-50"
                 style={{ background: 'rgba(76,106,72,0.7)' }}
               >

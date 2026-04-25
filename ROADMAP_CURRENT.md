@@ -257,3 +257,31 @@ CREATE INDEX IF NOT EXISTS idx_care_logs_plant_category
 ```sql
 ALTER TABLE plants ADD COLUMN IF NOT EXISTS is_name_verified boolean DEFAULT false;
 ```
+
+---
+
+## Session Summary — 2026-04-25
+
+**Search disambiguation with thumbnails:**
+- `supabase/functions/suggest-species/index.ts` — new Edge Function; accepts `{ query }`, returns 4–6 candidate species with `scientificName`, `commonName`, `description`; handles misspellings, phonetic approximations, and common names via Claude; deployed with `--no-verify-jwt`
+- `app/(app)/explore/page.tsx` — text search now goes through a disambiguation step: `suggest-species` → Wikipedia thumbnail enrichment (parallel client-side fetch to `en.wikipedia.org/api/rest_v1/page/summary/`) → 2-column card grid → user selects → `fetchProfile`; photo search still goes directly to profile (no disambiguation step needed)
+- `FormattedContent` component added — smart bullet/paragraph renderer; `• ` and `- ` lines become editorial dash lists; double-newline → paragraphs; graceful plain-text fallback
+- `fetch-species-info` prompt updated to request `\n• ` bullet formatting for multi-item fields (light, watering, common_problems, etc.)
+- Recently-viewed list now shows relative timestamps via `relativeTime()` helper
+- "Back to results" button added on species detail: if suggestions are in state, clears profile without a new API call; if arriving via `?species=` deep link, calls `window.history.back()`
+- `?species=` URL param on Explore page auto-triggers `fetchProfile(species)` on mount (supports deep links from Plant Detail)
+
+**Claude Design handoff — Editorial Botanical redesign:**
+- Fetched and extracted full design package from Claude Design export
+- Read chat transcripts and HANDOFF.md to understand full scope and intent
+- `components/BottomNav.tsx` — added camera FAB: olive-accent circle floating above-right of the nav pill, links to `/add-plant` as interim target; TODO: replace with `/camera` confirm-sheet route once that screen is built. Described in HANDOFF.md as "the most important pixel in the app."
+- `CLAUDE.md` — updated to document camera FAB behavior, `suggest-species` Edge Function, disambiguation flow, Wikipedia thumbnail pattern, `FormattedContent` renderer, recently-viewed localStorage, and deep link support
+
+**Upcoming screens from HANDOFF.md (not yet built):**
+- `/camera` — camera-first capture with confirm sheet; best-guess plant pre-selected from the camera roll photo; replace FAB target once built
+- `/plant/[id]/diagnose` — branching diagnostic question flow → verdict card → next-step checklist
+- `/plant/[id]/timelapse` — scrubbable filmstrip of all photos for a plant in chronological order
+- `/plant/[id]/lineage` — propagation graph (local records v1; no external DB)
+
+**Production:** https://viriditas-three.vercel.app/
+**Test account:** uitester@viriditas.dev / Viriditas2026!

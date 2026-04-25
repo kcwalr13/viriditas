@@ -105,7 +105,7 @@ viriditas/
 - [x] `app/(app)/settings/page.tsx` — Me: identity card, sign out, about
 - [x] `components/Icon.tsx` — 40 single-stroke SVGs replacing every emoji in the UI (added: `ruler`)
 - [x] `components/ui.tsx` — BigTitle, SectionLabel, Chip, StatusPip, HairlineButton
-- [x] `components/BottomNav.tsx` — floating pill with route-based active state
+- [x] `components/BottomNav.tsx` — floating pill with route-based active state + camera FAB (accent-colored, floats above-right of nav; links to `/add-plant`; TODO: replace with `/camera` confirm-sheet route)
 - [x] `components/NavGuard.tsx` — wraps BottomNav, hides on `/plant/[id]` and `/add-plant`
 - [x] `components/PlantPhoto.tsx` — warm blocky gradient placeholder when a plant has no cover photo
 - [x] `lib/types.ts` — Plant (+ fertilizing_interval_days, soil_type, tags, pest_notes, last_treatment_date), PlantPhoto, CareLog (+ measured type), AnalysisResult (+ health_score), SpeciesProfile (+ seasonal_care)

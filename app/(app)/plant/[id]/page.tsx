@@ -1738,6 +1738,33 @@ export default function PlantDetailPage() {
         </>
       )}
 
+      {/* ── Plant tools — timelapse / diagnose / lineage ─────────────── */}
+      <div className="px-5 pt-5 pb-2">
+        <div className="font-mono text-[10px] tracking-[0.14em] text-ink-muted uppercase mb-3">
+          § 08 · Tools
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <ToolTile
+            icon="camera"
+            label="Time-lapse"
+            sub={`${photos.length} frame${photos.length === 1 ? '' : 's'}`}
+            href={`/plant/${id}/timelapse`}
+          />
+          <ToolTile
+            icon="sparkle"
+            label="Diagnose"
+            sub="Guided flow"
+            href={`/plant/${id}/diagnose`}
+          />
+          <ToolTile
+            icon="scissors"
+            label="Lineage"
+            sub="Propagations"
+            href={`/plant/${id}/lineage`}
+          />
+        </div>
+      </div>
+
       {/* ── Dock: quick-care actions ──────────────────────────────────── */}
       <div
         className="fixed left-0 right-0 z-40 px-3.5 pointer-events-none"
@@ -2339,5 +2366,19 @@ function EditDate({ label, value, onChange }: { label: string; value: string; on
         />
       </div>
     </div>
+  )
+}
+
+// ── ToolTile — small action tile linking to plant sub-screens ───────────
+function ToolTile({ icon, label, sub, href }: { icon: import('@/components/Icon').IconName; label: string; sub: string; href: string }) {
+  return (
+    <a
+      href={href}
+      className="flex flex-col gap-1 p-3 bg-card border border-rule rounded-brand hover:bg-paper-alt transition-colors"
+    >
+      <Icon name={icon} size={18} className="text-accent" stroke={1.8} />
+      <div className="font-sans text-[12px] font-medium text-ink leading-tight">{label}</div>
+      <div className="font-mono text-[9px] tracking-wider uppercase text-ink-muted">{sub}</div>
+    </a>
   )
 }

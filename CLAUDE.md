@@ -105,8 +105,8 @@ viriditas/
 - [x] `app/(app)/settings/page.tsx` — Me: identity card, sign out, about
 - [x] `components/Icon.tsx` — 40 single-stroke SVGs replacing every emoji in the UI (added: `ruler`)
 - [x] `components/ui.tsx` — BigTitle, SectionLabel, Chip, StatusPip, HairlineButton
-- [x] `components/BottomNav.tsx` — floating pill with route-based active state + camera FAB (accent-colored, floats above-right of nav; links to `/add-plant`; TODO: replace with `/camera` confirm-sheet route)
-- [x] `components/NavGuard.tsx` — wraps BottomNav, hides on `/plant/[id]` and `/add-plant`
+- [x] `components/BottomNav.tsx` — floating pill with route-based active state + camera FAB (accent-colored, floats above-right of nav; routes to `/camera`)
+- [x] `components/NavGuard.tsx` — wraps BottomNav, hides on `/plant/[id]`, `/add-plant`, and `/camera`
 - [x] `components/PlantPhoto.tsx` — warm blocky gradient placeholder when a plant has no cover photo
 - [x] `lib/types.ts` — Plant (+ fertilizing_interval_days, soil_type, tags, pest_notes, last_treatment_date), PlantPhoto, CareLog (+ measured type), AnalysisResult (+ health_score), SpeciesProfile (+ seasonal_care)
 - [x] `lib/utils.ts` — formatDate, formatTimestamp, relativeTime, toLocalDateStr, fileToBase64, computeWateringStatus, computeFertilizingStatus, computeStreak, computeMaxStreak, CARE_LOG_LABELS, URGENCY_ORDER
@@ -116,6 +116,11 @@ viriditas/
 - [x] `supabase/functions/identify-species` — species from base64 photo (no storage)
 - [x] `supabase/functions/suggest-species` — 4-6 candidates for a freeform query
 - [x] `species_profiles` table — includes `pruning_tips`, `disease_symptoms`, `seasonal_care`; prompts request bullet-formatted content
+- [x] `app/(app)/camera/page.tsx` — Camera capture + confirm sheet; best-guess plant pre-selection (localStorage → first plant); uploads to `plant-photos` storage + `photos` table; saves `viriditas.lastCameraPlant` to localStorage for next session
+- [x] `app/(app)/plant/[id]/timelapse/page.tsx` — Growth filmstrip: loads all photos oldest-first, scrubber + play/pause, tap filmstrip thumbnail to jump to frame
+- [x] `app/(app)/plant/[id]/diagnose/page.tsx` — Branching diagnostic flow (11 verdicts, 3 question levels max); saves to `diagnoses` table (graceful-fail if migration not run); checklist with tap-to-complete next steps
+- [x] `app/(app)/plant/[id]/lineage/page.tsx` — Propagation graph; full CRUD for `propagations` table (graceful-fail if migration not run); log a cutting form with recipient, date, status, note
+- [x] Plant Detail `§ 08 · Tools` strip — three ToolTile cards linking to Time-lapse, Diagnose, and Lineage sub-screens
 
 ## What Comes Next
 See `ROADMAP_CURRENT.md` for known gaps, priorities, and suggested next steps.
@@ -365,6 +370,52 @@ When adding a new field to one of these context types, update three places: the 
 - **`FormattedContent` component**: renders species profile text with smart formatting — lines starting with `• ` or `- ` become bullet lists; double-newline separation becomes paragraphs; plain text falls back gracefully
 - **Bullet formatting in profiles**: `fetch-species-info` prompt requests `\n• ` bullet format for multi-item fields; existing cached entries won't have bullets until refreshed
 - **"Back to results" button**: shown on profile view when there are suggestions in state; clears profile and re-displays the grid without a new API call
+
+### New Sub-screens (Camera, Timelapse, Diagnose, Lineage)
+These screens require two SQL migrations not yet applied in production. Both screens gracefully handle missing tables (diagnoses/propagations return an empty state with a setup notice rather than crashing). Run both in the Supabase SQL editor before relying on the save functionality:
+
+**`diagnoses` table:**
+```sql
+create table if not exists diagnoses (
+  id uuid primary key default gen_random_uuid(),
+  plant_id uuid not null references plants(id) on delete cascade,
+  user_id uuid not null references auth.users(id),
+  created_at timestamptz not null default now(),
+  question_path jsonb not null,
+  verdict_id text not null,
+  verdict_title text not null,
+  confidence text not null,
+  reasoning text[] not null,
+  next_steps jsonb not null
+);
+create index if not exists idx_diagnoses_plant on diagnoses(plant_id, created_at desc);
+alter table diagnoses enable row level security;
+create policy "Users manage own diagnoses" on diagnoses
+  for all using (auth.uid() = user_id);
+```
+
+**`propagations` table:**
+```sql
+create table if not exists propagations (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id),
+  parent_plant_id uuid not null references plants(id) on delete cascade,
+  child_plant_id uuid references plants(id),
+  recipient_name text,
+  taken_on date not null,
+  status text not null check (status in ('rooting','thriving','failed','unknown')) default 'rooting',
+  note text
+);
+create index if not exists idx_propagations_parent on propagations(parent_plant_id);
+alter table propagations enable row level security;
+create policy "Users manage own propagations" on propagations
+  for all using (auth.uid() = user_id);
+```
+
+- **Camera best-guess logic**: `viriditas.lastCameraPlant` localStorage key stores the last plant used in the camera confirm flow; used as the first-choice pre-selection on next open
+- **Timelapse data source**: reads from the existing `photos` table ordered `created_at ASC` (oldest first) — no new table needed
+- **Diagnose verdicts**: 11 verdicts defined statically in the component (no AI call); question tree is ≤3 levels deep; saves to `diagnoses` table silently (errors swallowed)
+- **Lineage v1**: recipient is free-text; no cross-account linking; `child_plant_id` nullable for forward compatibility with v2
 
 ## Versioning Convention
 

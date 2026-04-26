@@ -54,10 +54,9 @@ export function BottomNav() {
         {/* Camera FAB — floats above and to the right of the nav pill.
             Design intent: instant photo-first entry point for care logging and
             new plant identification. "The most important pixel in the app."
-            Currently routes to /add-plant (camera step); replace with /camera
-            once the dedicated confirm-sheet flow is built. */}
+            Routes to /camera — the dedicated confirm-sheet capture flow. */}
         <button
-          onClick={() => router.push('/add-plant')}
+          onClick={() => router.push('/camera')}
           aria-label="Add plant or log a photo"
           className="absolute right-3.5 -top-16 w-14 h-14 rounded-full flex items-center justify-center border-[3px] border-paper"
           style={{

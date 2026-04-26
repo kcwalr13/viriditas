@@ -285,3 +285,55 @@ ALTER TABLE plants ADD COLUMN IF NOT EXISTS is_name_verified boolean DEFAULT fal
 
 **Production:** https://viriditas-three.vercel.app/
 **Test account:** uitester@viriditas.dev / Viriditas2026!
+
+---
+
+## Session Summary — 2026-04-25 (New screens from HANDOFF.md)
+
+**Camera capture screen (`/camera`):**
+- Full-screen dark capture UI with framing guide + corner brackets
+- Mode pills: Snap / Diagnose / Identify (visual; Diagnose/Identify not yet wired)
+- File input with `capture="environment"` for native camera on mobile; file picker on desktop
+- After photo selection → confirm sheet with: photo preview, best-guess plant picker (heuristic: `viriditas.lastCameraPlant` localStorage → first plant), confirm / "This is a new plant" / retake
+- On confirm: uploads to Supabase Storage (`plant-photos` bucket) + inserts `photos` row, saves plant id to localStorage, navigates to plant detail
+- `NavGuard.tsx` updated to hide BottomNav on `/camera`
+- `BottomNav.tsx` FAB target updated from `/add-plant` to `/camera`
+
+**Time-lapse (`/plant/[id]/timelapse`):**
+- Loads all photos from `photos` table, oldest-first (existing table — no migration)
+- Large stage image with gradient caption overlay and frame counter chip
+- Horizontal filmstrip (tap any thumbnail to jump to that frame)
+- Play/pause with 700ms interval auto-advance; play from beginning if at last frame
+- Range scrubber for precise frame selection
+- Summary stat card: days spanned, total photos, first-seen month
+- Empty state with prompt to add photos from plant detail
+
+**Diagnose (`/plant/[id]/diagnose`):**
+- 11 distinct verdicts: overwatering, underwatering, low_humidity, pests, low_light, root_bound, underfeeding, iron_deficiency, leaf_disease, mineral_buildup, fungus_gnats
+- Question tree ≤3 levels deep; breadcrumb trail shows answer path during flow
+- Verdict card: confidence badge, "Why I think so" reasoning bullets, next-step checklist with tap-to-complete
+- "Do today" badge on immediate next steps; strikethrough on completed items
+- Saves to `diagnoses` table on completion (graceful-fail; UI fully functional without migration)
+- **Migration required** — see CLAUDE.md for SQL
+
+**Lineage (`/plant/[id]/lineage`):**
+- Shows the plant as a "You" node with an accent border
+- Lists all propagations from `propagations` table below it
+- "Log a cutting" form: recipient name, date, status (rooting/thriving/failed/unknown), note
+- Status can be updated in-place via expandable status picker on each card
+- Shows friendly "setup needed" banner if `propagations` table doesn't exist yet
+- **Migration required** — see CLAUDE.md for SQL
+
+**Plant Detail updates:**
+- New `§ 08 · Tools` section with three ToolTile cards: Time-lapse, Diagnose, Lineage
+- Section sits above the floating care dock, accessible without scrolling to the bottom
+
+**Blocker — run in Supabase SQL editor before using Diagnose/Lineage:**
+```sql
+-- diagnoses table (see CLAUDE.md for full SQL)
+-- propagations table (see CLAUDE.md for full SQL)
+```
+
+**Version bump:** 1.3.0 → 1.4.0
+**Production:** https://viriditas-three.vercel.app/
+**Test account:** uitester@viriditas.dev / Viriditas2026!

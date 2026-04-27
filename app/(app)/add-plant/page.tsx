@@ -124,13 +124,25 @@ export default function AddPlantPage() {
         body: { imageBase64: base64, mimeType: file.type },
         headers: { Authorization: `Bearer ${session.access_token}` },
       })
-      if (fnError) throw new Error(fnError.message || 'Identify failed')
-      if (data?.error) throw new Error(data.error)
+
+      // fnError means the function returned a non-2xx. This is a soft failure —
+      // the user can still continue and set the species manually in step 2.
+      // We show a friendly message rather than the SDK's raw error string.
+      if (fnError || data?.error) {
+        setError('Could not auto-identify the species — you can set it manually on the next step.')
+        return
+      }
       if (data?.speciesName) {
         setIdentifyResult({ speciesName: data.speciesName, confidence: data.confidence ?? 0 })
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Could not identify species.')
+      // Network error or similar — same soft-fail treatment.
+      const msg = err instanceof Error ? err.message : ''
+      if (msg === 'Not logged in') {
+        setError('Your session expired. Please sign out and back in.')
+      } else {
+        setError('Could not auto-identify the species — you can set it manually on the next step.')
+      }
     } finally {
       setIdentifying(false)
     }
@@ -273,7 +285,11 @@ export default function AddPlantPage() {
         />
 
         {error && (
-          <div className="mx-5 mt-3 px-3 py-2 bg-danger-soft border border-rule rounded-brand text-sm text-danger">
+          <div className={`mx-5 mt-3 px-3 py-2 border rounded-brand text-sm ${
+            error.includes('session expired') || error.includes('Not logged')
+              ? 'bg-danger-soft border-rule text-danger'
+              : 'bg-warn-soft border-rule text-warn'
+          }`}>
             {error}
           </div>
         )}

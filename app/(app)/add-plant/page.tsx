@@ -478,7 +478,7 @@ function Step2({
 
       <div className="mt-6">
         <label className="font-mono text-[10px] tracking-[0.14em] uppercase text-ink-muted">
-          Nickname
+          Nickname · required
         </label>
         <input
           value={nickname}
@@ -487,6 +487,13 @@ function Step2({
           className="mt-1.5 w-full px-4 py-3.5 border border-rule rounded-brand bg-card font-serif italic text-[20px] text-ink"
           autoFocus
         />
+        {/* Continue is disabled while this is empty — say so instead of
+            leaving a dimmed button with no explanation. */}
+        {!nickname.trim() && (
+          <p className="mt-1.5 text-xs text-warn">
+            Give your plant a name to continue.
+          </p>
+        )}
       </div>
 
       <div className="mt-5">
@@ -658,10 +665,11 @@ function Step3({
         )}
       </div>
 
-      {/* Small visual ghost so the screen doesn't feel empty while scrolling. */}
-      <div className="mt-6 flex justify-center opacity-40">
+      {/* Preview tile keyed by the nickname. Full opacity — at opacity-40 the
+          warm gradient washed into the paper background and read as flat grey. */}
+      <div className="mt-6 flex justify-center">
         <div className="w-24 h-24 rounded-brand overflow-hidden border border-rule">
-          <PlantPhoto name={nickname || 'new-plant'} showLabel={false} />
+          <PlantPhoto name={nickname || 'new-plant'} label={nickname || undefined} showLabel={!!nickname} />
         </div>
       </div>
     </div>

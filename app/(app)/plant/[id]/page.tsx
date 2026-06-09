@@ -928,13 +928,13 @@ export default function PlantDetailPage() {
           label="Care total"
           value={String(totalCareEvents)}
           sub={logsThisMonth > 0 ? `${logsThisMonth} this month` : totalCareEvents === 0 ? 'start logging' : '0 this month'}
-          tone={totalCareEvents > 10 ? 'good' : totalCareEvents > 0 ? 'due-soon' : 'unset'}
+          tone={totalCareEvents > 0 ? 'neutral' : 'unset'}
         />
         <StatusStat
           label="Streak"
           value={plantStreak > 0 ? `${plantStreak}d` : '—'}
           sub={plantStreak > 0 ? 'consecutive' : 'no streak yet'}
-          tone={plantStreak >= 7 ? 'good' : plantStreak > 0 ? 'due-soon' : 'unset'}
+          tone={plantStreak > 0 ? 'neutral' : 'unset'}
         />
       </div>
 
@@ -1516,13 +1516,19 @@ export default function PlantDetailPage() {
                   const dateLabel = nextDate.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
                   return `Next in ${daysLeft}d · ${dateLabel}`
                 })()
-              : 'Schedule set'
+              : `Schedule set · every ${plant.watering_interval_days} days`
             }
           </div>
         ) : (
           <p className="text-xs text-ink-soft mb-3">Controls the watering status badge shown on the home screen.</p>
         )}
         <div className="flex flex-wrap gap-1.5">
+          {/* Interval set to a value outside the presets (e.g. 30d from the
+              Add Plant wizard) — surface it as the selected chip so the
+              current schedule is always visible. */}
+          {plant.watering_interval_days && !REMINDER_OPTIONS.includes(plant.watering_interval_days) && (
+            <Chip active>{plant.watering_interval_days}d</Chip>
+          )}
           {REMINDER_OPTIONS.map(d => (
             <Chip
               key={d}
@@ -1558,13 +1564,18 @@ export default function PlantDetailPage() {
                   const dateLabel = nextDate.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })
                   return `Next in ${daysLeft}d · ${dateLabel}`
                 })()
-              : 'Schedule set'
+              : `Schedule set · every ${plant.fertilizing_interval_days} days`
             }
           </div>
         ) : (
           <p className="text-xs text-ink-soft mb-3">Controls the feeding status badge. Most houseplants benefit from fertilizing every 2–4 weeks in the growing season.</p>
         )}
         <div className="flex flex-wrap gap-1.5">
+          {/* Interval set to a value outside the presets (e.g. 30d) — surface
+              it as the selected chip so the current schedule is always visible. */}
+          {plant.fertilizing_interval_days && !REMINDER_OPTIONS.includes(plant.fertilizing_interval_days) && (
+            <Chip active>{plant.fertilizing_interval_days}d</Chip>
+          )}
           {REMINDER_OPTIONS.map(d => (
             <Chip
               key={d}
@@ -1907,10 +1918,13 @@ export default function PlantDetailPage() {
 
 function StatusStat({
   label, value, sub, tone,
-}: { label: string; value: string; sub: string; tone: 'overdue' | 'due-soon' | 'good' | 'unset' }) {
+}: { label: string; value: string; sub: string; tone: 'overdue' | 'due-soon' | 'good' | 'unset' | 'neutral' }) {
+  // 'neutral' is for informational counters (care total, streak) — warn and
+  // danger are reserved for actionable urgency like overdue watering.
   const colorClass = tone === 'overdue' ? 'text-danger'
                    : tone === 'due-soon' ? 'text-warn'
                    : tone === 'unset' ? 'text-ink-muted'
+                   : tone === 'neutral' ? 'text-ink'
                    : 'text-accent'
   return (
     <div>

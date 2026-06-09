@@ -37,10 +37,21 @@ export async function middleware(request: NextRequest) {
   const { data: { user } } = await supabase.auth.getUser()
 
   const pathname = request.nextUrl.pathname
+  // Pages reachable without a session. /forgot-password and /auth are part of
+  // the password-reset flow — the reset email link lands on /auth, which must
+  // load so the one-time code can be exchanged for a session.
+  const isPublicPage =
+    pathname === '/sign-in' ||
+    pathname === '/sign-up' ||
+    pathname === '/forgot-password' ||
+    pathname === '/auth'
+  // Only these bounce signed-in users home. /auth is deliberately excluded:
+  // a signed-in user clicking a reset link must still reach the form, and the
+  // recovery session created mid-flow must not eject them before they finish.
   const isAuthPage = pathname === '/sign-in' || pathname === '/sign-up'
 
   // Unauthenticated user trying to access a protected page → send to sign-in
-  if (!user && !isAuthPage) {
+  if (!user && !isPublicPage) {
     const url = request.nextUrl.clone()
     url.pathname = '/sign-in'
     return NextResponse.redirect(url)

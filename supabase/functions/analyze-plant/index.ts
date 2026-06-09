@@ -16,6 +16,7 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { encode as encodeBase64 } from 'https://deno.land/std@0.168.0/encoding/base64.ts'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -175,6 +176,23 @@ function detectMediaType(bytes: Uint8Array): ImageMediaType {
   return 'image/jpeg'
 }
 
+// SSRF guard: the function fetches imageUrl server-side, so a malicious caller
+// could otherwise point it at internal services or arbitrary hosts. Only URLs
+// on this project's own Supabase Storage (plant-photos bucket) are allowed.
+function isAllowedImageUrl(imageUrl: string): boolean {
+  try {
+    const parsed = new URL(imageUrl)
+    const allowedHost = new URL(Deno.env.get('SUPABASE_URL') ?? '').hostname
+    return (
+      parsed.protocol === 'https:' &&
+      parsed.hostname === allowedHost &&
+      parsed.pathname.startsWith('/storage/v1/object/public/plant-photos/')
+    )
+  } catch {
+    return false
+  }
+}
+
 async function fetchImageAsBase64(imageUrl: string): Promise<{ base64: string; mediaType: ImageMediaType }> {
   const response = await fetch(imageUrl)
   if (!response.ok) throw new Error(`Failed to fetch image (${response.status}): ${imageUrl}`)
@@ -253,6 +271,29 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   try {
+    // Verify that the caller is a signed-in Viriditas user. The function is
+    // deployed with --no-verify-jwt, so it must validate the token itself.
+    const authHeader = req.headers.get('Authorization')
+    if (!authHeader) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      { global: { headers: { Authorization: authHeader } } }
+    )
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
     const {
       imageUrl,
       previousAnalyses = [],
@@ -265,6 +306,13 @@ serve(async (req) => {
     if (!imageUrl) {
       return new Response(
         JSON.stringify({ error: 'imageUrl is required' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (!isAllowedImageUrl(imageUrl)) {
+      return new Response(
+        JSON.stringify({ error: 'imageUrl must point to the plant-photos storage bucket' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }

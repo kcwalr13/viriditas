@@ -118,6 +118,32 @@ async function callGemini(speciesName: string): Promise<Record<string, string>> 
   return JSON.parse(data.candidates[0].content.parts[0].text)
 }
 
+// ── Profile field whitelist ───────────────────────────────────────────────────
+
+// The AI's JSON is untrusted output. Map it field-by-field onto the exact
+// species_profiles schema instead of spreading it into the upsert — a blind
+// spread would let unexpected keys reach the database write.
+function sanitizeProfileFields(fields: Record<string, unknown>) {
+  const str = (v: unknown): string | null =>
+    typeof v === 'string' && v.trim() !== '' ? v : null
+  return {
+    common_names:     str(fields.common_names),
+    scientific_name:  str(fields.scientific_name),
+    light:            str(fields.light),
+    watering:         str(fields.watering),
+    humidity:         str(fields.humidity),
+    temperature:      str(fields.temperature),
+    soil:             str(fields.soil),
+    toxicity:         str(fields.toxicity),
+    common_problems:  str(fields.common_problems),
+    growth_habits:    str(fields.growth_habits),
+    propagation:      str(fields.propagation),
+    pruning_tips:     str(fields.pruning_tips),
+    disease_symptoms: str(fields.disease_symptoms),
+    seasonal_care:    str(fields.seasonal_care),
+  }
+}
+
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 serve(async (req) => {
@@ -126,6 +152,30 @@ serve(async (req) => {
   }
 
   try {
+    // Verify that the caller is a signed-in Viriditas user. This function
+    // writes to the shared species_profiles cache with the service role, so
+    // it must not be callable anonymously (cache poisoning + free AI calls).
+    const authHeader = req.headers.get('Authorization')
+    if (!authHeader) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
+    const authClient = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      { global: { headers: { Authorization: authHeader } } }
+    )
+    const { data: { user }, error: authError } = await authClient.auth.getUser()
+    if (authError || !user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+        status: 401,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      })
+    }
+
     const { speciesName, forceRefresh = false } = await req.json()
 
     if (!speciesName || typeof speciesName !== 'string' || speciesName.trim() === '') {
@@ -188,7 +238,7 @@ serve(async (req) => {
       .from('species_profiles')
       .upsert({
         species_name: normalizedName,
-        ...profileFields,
+        ...sanitizeProfileFields(profileFields),
         updated_at: new Date().toISOString(),
       }, {
         onConflict: 'species_name',  // Don't fail if it was just inserted by another request

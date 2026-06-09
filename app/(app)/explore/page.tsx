@@ -839,8 +839,13 @@ function shortPreview(text: string | null): string {
 function toxicityShort(text: string | null): string {
   if (!text) return 'Unknown'
   const lower = text.toLowerCase()
-  if (lower.includes('non-toxic') || lower.includes('pet safe') || lower.includes('safe')) return 'Pet safe'
-  if (lower.includes('toxic')) return 'Toxic'
+  // Strip negated phrases first so "non-toxic" can't trip the danger test below.
+  const dangerText = lower.replace(/non-?toxic|not toxic/g, '')
+  // Danger wording wins: "non-toxic to humans but toxic to cats" must read
+  // Toxic. A plain includes('safe') used to label "Unsafe for cats" Pet safe.
+  if (/toxic|poison|unsafe|not safe|harmful/.test(dangerText)) return 'Toxic'
+  // \b keeps "safe" from matching inside "unsafe".
+  if (/\bsafe\b|non-?toxic|not toxic/.test(lower)) return 'Pet safe'
   return shortPreview(text)
 }
 

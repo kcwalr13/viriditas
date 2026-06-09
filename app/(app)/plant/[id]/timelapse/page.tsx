@@ -14,7 +14,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Icon } from '@/components/Icon'
 import { PlantPhoto } from '@/components/PlantPhoto'
-import { formatDate } from '@/lib/utils'
+import { formatDate, toLocalDateStr } from '@/lib/utils'
 import type { Plant, PlantPhoto as PlantPhotoType } from '@/lib/types'
 
 // Milliseconds per frame when playing.
@@ -172,7 +172,7 @@ export default function TimelapsePage() {
               style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.65), transparent)' }}
             >
               <div className="font-mono text-[9px] tracking-[1.4px] uppercase text-white/80">
-                Frame {frameIdx + 1} / {totalFrames} · {frame ? formatDate(frame.created_at) : ''}
+                Frame {frameIdx + 1} / {totalFrames} · {frame ? formatDate(toLocalDateStr(frame.created_at)) : ''}
               </div>
             </div>
 

@@ -3,9 +3,8 @@
 // Floating pill-shaped bottom nav with a camera FAB.
 //
 // Nav tabs: Today (/) · Plants (/plants) · Explore (/explore) · Me (/settings)
-// Camera FAB: floats above the nav rail on the right; opens the Add Plant wizard
-//   which starts with a camera-first identify step. TODO: replace with a
-//   dedicated /camera route (confirm-sheet flow) once that screen is built.
+// Camera FAB: floats above the nav rail on the right; routes to /camera, the
+//   dedicated capture + confirm-sheet flow.
 //
 // Hidden on /plant/[id] (has its own care dock) and /add-plant (modal flow).
 import Link from 'next/link'

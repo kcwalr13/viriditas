@@ -229,7 +229,7 @@ export default function LineagePage() {
               )}
               {plant.acquired_date && (
                 <div className="text-[11px] text-ink-muted mt-1">
-                  Since {formatDate(plant.acquired_date + 'T12:00:00')}
+                  Since {formatDate(plant.acquired_date)}
                 </div>
               )}
             </div>
@@ -264,7 +264,7 @@ export default function LineagePage() {
             </div>
           )}
 
-          {propagations.map((prop, i) => (
+          {propagations.map(prop => (
             <div key={prop.id} className="mb-3">
               <PropagationCard
                 prop={prop}
@@ -442,7 +442,7 @@ function PropagationCard({
             {prop.recipient_name ?? 'Unnamed recipient'}
           </div>
           <div className="text-[11px] text-ink-muted mt-1">
-            Taken {formatDate(prop.taken_on + 'T12:00:00')}
+            Taken {formatDate(prop.taken_on)}
           </div>
           {prop.note && (
             <div className="font-serif italic text-[13px] text-ink-soft mt-1.5 leading-snug">

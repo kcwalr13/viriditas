@@ -4,7 +4,7 @@
 // peek from the Server Component and renders the editorial home screen.
 import Link from 'next/link'
 import Image from 'next/image'
-import { useMemo, useState, useRef, useCallback } from 'react'
+import { useMemo, useState, useRef, useCallback, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { BigTitle, SectionLabel, StatusPip, HairlineButton } from '@/components/ui'
 import { Icon } from '@/components/Icon'
@@ -100,9 +100,10 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
 
   const totalTodo = overdue.length + dueSoon.length
   // Persist overdue count to localStorage so BottomNav can show a badge.
-  if (typeof window !== 'undefined') {
+  // Must run in an effect — writing during render causes a hydration mismatch.
+  useEffect(() => {
     localStorage.setItem('viriditas.overdueCount', String(overdue.length))
-  }
+  }, [overdue.length])
 
   // Plants with no watering schedule at all — surface a nudge.
   const unscheduled = useMemo(() => cards.filter(c => c.wateringStatus === 'unset'), [cards])
@@ -228,8 +229,10 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
       {/* ── Streak strip ──────────────────────────────────────────────── */}
       {streak > 0 && (
         <Link href="/settings" className="mx-5 mt-3.5 flex items-center gap-3 px-3.5 py-3 bg-paper-alt border border-rule rounded-brand">
+          {/* Streak count, not an icon — the flame glyph read as a digit "9"
+              and was mistaken for the calendar date. */}
           <div className="w-[34px] h-[34px] rounded-full bg-accent flex items-center justify-center shrink-0">
-            <Icon name="flame" size={18} stroke={1.8} className="text-paper" />
+            <span className="font-sans font-semibold text-[13px] leading-none text-paper">{streak}</span>
           </div>
           <div className="flex-1">
             <div className="text-[13px] font-semibold tracking-[-0.01em] text-ink">

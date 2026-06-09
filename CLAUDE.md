@@ -431,3 +431,5 @@ Use **semantic versioning** (MAJOR.MINOR.PATCH):
 - `1.1.0` — NavGuard, Plants collection enhancements, Plant Detail v2 (carousel, lightbox, fertilizing schedule, tags/soil/pest edit, Measure action, ZIP export)
 - `1.2.0` — Phase 15: structured journaling (NoteCategory, MeasurementUnit, category picker, measurement picker, expanded AI context)
 - `1.3.0` — P1/P2 backlog: password reset, storage cleanup on delete, re-analyze gate, species cache invalidation, log pagination, Quick Add Note sheet, streak strip navigation, Add Plant autocomplete, Explore real categories
+- `1.4.0` — Camera, Timelapse, Diagnose, and Lineage screens; camera FAB; § 08 Tools strip on Plant Detail
+- `1.5.0` — Review remediation: fixed the lint error that was failing every Vercel build since 1.4.0 (production was stuck on 1.3.0 — the cause of the "missing" Tools strip and /camera 404); Edge Function auth + SSRF/cache-poisoning hardening; Today hydration fix; password-reset routes whitelisted in middleware; toxicity label fix; streak badge, schedule chips, stat colors, Add Plant validation, Invalid Date fixes; custom 404 page

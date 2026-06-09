@@ -18,11 +18,17 @@
 //   speciesName is null if the image doesn't show a recognisable plant.
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
+
+// The only image formats the Claude API accepts — and the only mimeType
+// values we forward. Anything else is rejected up front.
+const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'] as const
+type AllowedMimeType = typeof ALLOWED_MIME_TYPES[number]
 
 serve(async (req) => {
   // Handle CORS preflight
@@ -31,9 +37,24 @@ serve(async (req) => {
   }
 
   try {
-    // Verify the user is authenticated (token passed by the app)
+    // Verify that the caller is a signed-in Viriditas user. Checking only
+    // that an Authorization header EXISTS is not authentication — the token
+    // must be validated against the Supabase auth server.
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) {
+      return new Response(
+        JSON.stringify({ error: 'Unauthorized' }),
+        { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    const supabase = createClient(
+      Deno.env.get('SUPABASE_URL') ?? '',
+      Deno.env.get('SUPABASE_ANON_KEY') ?? '',
+      { global: { headers: { Authorization: authHeader } } }
+    )
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) {
       return new Response(
         JSON.stringify({ error: 'Unauthorized' }),
         { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
@@ -45,6 +66,13 @@ serve(async (req) => {
     if (!imageBase64 || !mimeType) {
       return new Response(
         JSON.stringify({ error: 'imageBase64 and mimeType are required' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    if (!ALLOWED_MIME_TYPES.includes(mimeType as AllowedMimeType)) {
+      return new Response(
+        JSON.stringify({ error: `mimeType must be one of: ${ALLOWED_MIME_TYPES.join(', ')}` }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       )
     }

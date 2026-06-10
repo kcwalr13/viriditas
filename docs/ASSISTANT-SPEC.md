@@ -44,7 +44,7 @@ When an analysis says "reduce watering for winter," nothing happens: no task, no
 `lib/notifications.ts` is an explicit no-op stub ("push notifications are not supported in the web version"). Modern PWA web push works on iOS 16.4+/Android/desktop. Without it, follow-through ("has the yellowing spread? show me") is impossible — the user must remember to ask.
 
 **F6 — Species identity is never verified.**
-`lib/types.ts` declares `is_name_verified?: boolean`; no code reads or writes it (the column's production existence is itself unverified — see `docs/DATABASE.md` TODO). AI misidentification at add-time silently becomes the plant's permanent identity, and every downstream feature (care guidance, diagnosis context, toxicity) keys off it.
+`lib/types.ts` declares `is_name_verified?: boolean`; no code reads or writes it (column confirmed live in production, 2026-06-10: boolean, default false). AI misidentification at add-time silently becomes the plant's permanent identity, and every downstream feature (care guidance, diagnosis context, toxicity) keys off it.
 
 **F7 — Species knowledge has no provenance and no correction path.**
 `species_profiles` rows are single-shot Haiku generations, cached globally and served as authority. Consistency: excellent (everyone sees the same thing). Accuracy: unaudited — and the cache makes any error *permanently consistent*. The toxicity field is the sharpest edge (pet-safety information). "Refresh" regenerates; it does not correct.
@@ -213,7 +213,7 @@ Smallest credible version — no new AI surface, just making existing knowledge 
 
 ### Phase 5 — Accuracy program  `P1, with one P0 slice · target v1.10.0`
 
-- **(P0 slice) Species identity verification.** First verify/apply the `is_name_verified` migration (status unverified — `docs/DATABASE.md`). Plant Detail dossier: species row gains a quiet `Confirm` chip when unverified → sets `is_name_verified=true`; manual species edits set it too; verified rows show a small mono "VERIFIED" tag. Add Plant step 1: AI identification shows "AI-identified — tap to confirm or correct" beneath the result. `analyze-plant` context gains one line: identity verified vs AI-assumed (lets the model hedge species-specific claims when unverified).
+- **(P0 slice) Species identity verification.** The `is_name_verified` column is confirmed live in production (verified 2026-06-10) — no migration needed, code only. Plant Detail dossier: species row gains a quiet `Confirm` chip when unverified → sets `is_name_verified=true`; manual species edits set it too; verified rows show a small mono "VERIFIED" tag. Add Plant step 1: AI identification shows "AI-identified — tap to confirm or correct" beneath the result. `analyze-plant` context gains one line: identity verified vs AI-assumed (lets the model hedge species-specific claims when unverified).
 - **Species fact flagging.** `species_profile_flags` table (Appendix A) + a "Report an issue" affordance on each species-guide section (field, optional note). Flags are for Kyle's review (a simple list under Settings → flagged facts); no auto-correction.
 - **Toxicity caution line.** Wherever toxicity renders, a one-line mono caption: "AI-generated — verify with your vet for pet-critical decisions." (Honest authority beats implied authority.)
 - **Provider consolidation.** Pending the open question below: remove the Gemini branches and the `AI_PROVIDER` switch, or document it as frozen/unsupported. Either way, stop the half-state.
@@ -240,7 +240,7 @@ Diagnosis sessions on Sonnet: roughly 3–6k input tokens/turn (context + image)
 |---|---|---|---|
 | 1 | Retire Gemini entirely (delete branches + secret) vs freeze-and-document? Recommendation: retire — one voice, one quality bar, less code. | Kyle | Blocks only Phase 5's last item |
 | 2 | Exact Sonnet model string at implementation time (this spec assumes `claude-sonnet-4-6`). | Implementing session (check docs) | Blocks Phase 2 deploy |
-| 3 | Is the `is_name_verified` column live in production? (`select column_name from information_schema.columns where table_name='plants'`) | Implementing session / Kyle via SQL editor | Blocks Phase 5 P0 slice |
+| 3 | ~~Is the `is_name_verified` column live in production?~~ **Resolved 2026-06-10: yes** — boolean, default false, confirmed via production SQL. Phase 5 slice is code-only. | — | No |
 | 4 | Supabase scheduled functions availability on current plan/CLI vs Vercel Cron for the push sender. | Implementing session (verify, then choose) | Blocks Phase 4 only |
 | 5 | Should "Done" on a recommendation that maps to no care-log type (e.g., "move the plant") write a `moved` log automatically? Recommendation: yes when unambiguous, else skip. | Kyle (taste call) | No — default to recommendation |
 
@@ -315,7 +315,7 @@ alter table species_profile_flags enable row level security;
 create policy "Users manage own species_profile_flags" on species_profile_flags
   for all using (auth.uid() = user_id);
 
--- Phase 5 (verify before running — may already exist; status unverified per docs/DATABASE.md)
+-- Phase 5: NOT NEEDED — column confirmed live in production 2026-06-10 (kept for fresh-project setup)
 alter table plants add column if not exists is_name_verified boolean default false;
 ```
 

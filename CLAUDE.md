@@ -273,11 +273,11 @@ Floating pill with four tabs: **Today / Plants / Explore / Me**, plus an accent-
 > **Full schema reference** — column types, constraints, RLS policies, indexes, and the
 > consolidated migration SQL live in `docs/DATABASE.md`. Keep both in sync when the schema changes.
 
-> **`is_name_verified` (TODO — unverified):** `lib/types.ts` declares an optional
-> `is_name_verified?: boolean` on `Plant`, and a migration for it was written on 2026-04-19
-> (`ALTER TABLE plants ADD COLUMN IF NOT EXISTS is_name_verified boolean DEFAULT false;`),
-> but whether that migration was ever applied in production is not verifiable from this repo.
-> No app code reads or writes the column yet. Confirm against the live database before using it.
+> **`is_name_verified` (confirmed live, unused):** `lib/types.ts` declares an optional
+> `is_name_verified?: boolean` on `Plant`. The column **exists in production** (verified
+> against the live database 2026-06-10: boolean, default false). No app code reads or
+> writes it yet — the planned consumer is the identity-verification slice in
+> `docs/ASSISTANT-SPEC.md` (Phase 5).
 
 **care_logs type constraint** — allowed values: `watered`, `fertilized`, `note`, `repotted`, `pruned`, `misted`, `pest_treatment`, `moved`, `measured`. To add new types:
 ```sql

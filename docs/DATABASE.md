@@ -37,7 +37,7 @@ One row per registered plant, owned by a user.
 | `pest_notes` | text, nullable | pest history; passed to the AI |
 | `last_treatment_date` | date, nullable | most recent pest treatment |
 | `created_at` | timestamptz | |
-| `is_name_verified` | boolean — **TODO/unverified** | declared optional in `lib/types.ts`; migration written 2026-04-19 but never confirmed applied; no app code reads/writes it yet |
+| `is_name_verified` | boolean, default `false` — **confirmed live in production (2026-06-10)** | declared optional in `lib/types.ts`; no app code reads or writes it yet (planned: docs/ASSISTANT-SPEC.md Phase 5) |
 
 ### `photos`
 

@@ -138,7 +138,7 @@ Prompt changes in `analyze-plant/index.ts`: require 0–3 actions ("emit zero wh
 
 **1.3 Persistence** — follow the existing ownership pattern (the **client** inserts `analysis_results` at `plant/[id]/page.tsx:~498`): after a successful analysis the client inserts one `care_recommendations` row per action (status `proposed`, `source='analysis'`, `source_id=` the new analysis id, `due_date` = today + `due_in_days`). The interval suggestion is stored on a recommendation row with `interval_suggestion` set and `action` like "Change watering to every 10 days".
 
-**1.4 Today integration** (`app/(app)/page.tsx` + `TodayClient.tsx`): new section **"§ Assistant — proposed"** between the task list and the collection strip, rendered only when proposals exist. Each card: plant name, action, urgency chip (reuse `Chip` tones: now→danger, soon→warn, routine→neutral), rationale as collapsible serif footnote, and three controls — **Accept**, **Done** (did it just now → also writes a matching `care_logs` entry when the action maps to a log type), **Dismiss** (sheet with the three reasons). Accepted items join the main task list sorted by `due_date`/urgency above interval tasks of equal urgency. Accepting an `interval_suggestion` shows a confirm sheet ("Watering: every 7d → every 10d") and on confirm updates `plants.watering_interval_days`/`fertilizing_interval_days` — never silently.
+**1.4 Today integration** (`app/(app)/page.tsx` + `TodayClient.tsx`): new section **"§ Assistant — proposed"** between the task list and the collection strip, rendered only when proposals exist. Each card: plant name, action, urgency chip (reuse `Chip` tones: now→danger, soon→warn, routine→neutral), rationale as collapsible serif footnote, and three controls — **Accept**, **Done** (did it just now → also writes a matching `care_logs` entry per the decided conservative map: move→`moved`, prune→`pruned`, mist→`misted`, pest treatment→`pest_treatment`, water/feed→existing types; note "via assistant"; ambiguous → no log), **Dismiss** (sheet with the three reasons). Accepted items join the main task list sorted by `due_date`/urgency above interval tasks of equal urgency. Accepting an `interval_suggestion` shows a confirm sheet ("Watering: every 7d → every 10d") and on confirm updates `plants.watering_interval_days`/`fertilizing_interval_days` — never silently.
 
 **1.5 Plant Detail**: the AI-diagnosis card renders the same action rows inline (read-only status after resolution). Server fetch additions follow the existing 3-query enrichment pattern (`.in('plant_id', ids)`).
 
@@ -159,7 +159,7 @@ Replaces the *brand promise* of the static tree with a real, bounded, multimodal
 `id, plant_id, user_id, status ('active'|'concluded'|'abandoned'), turns (jsonb array — the transcript), ask_count (int default 0), verdict (jsonb, nullable), diagnosis_id (uuid, nullable → diagnoses.id once concluded), created_at, concluded_at`.
 Transcript turn shape: `{ role: 'user'|'assistant', type: 'opening'|'photo'|'answer'|'question'|'photo_request'|'verdict', text?: string, photo_path?: string, options?: string[], at: ISO timestamp }`.
 
-**2.2 New Edge Function `diagnose-plant`** — Claude-only (no `AI_PROVIDER` branch), model **`claude-sonnet-4-6`** (verify the current recommended Sonnet model string at implementation time; rationale: highest-stakes path, low volume — see cost note in Part IV). Auth via `getUser()`; same CORS + error-shape conventions as the other functions.
+**2.2 New Edge Function `diagnose-plant`** — Claude-only (no `AI_PROVIDER` branch), model **`claude-sonnet-4-6`** (decided — current Sonnet as of 2026-06-10; rationale: highest-stakes path, low volume — see cost note in Part IV). Auth via `getUser()`; same CORS + error-shape conventions as the other functions.
 
 Request: `{ sessionId?: uuid, plantId: uuid, userText?: string, photoPath?: string }` — first call omits `sessionId` and opens with the user's complaint (or "general checkup") + optionally a fresh photo. Photos are uploaded by the client to the `plant-photos` bucket under `{userId}/{plantId}/diagnosis/{sessionId}/{ts}.{ext}` **without** inserting into `photos`(keeps Timelapse/photo strip clean — they read the `photos` table); the function fetches them with the same bucket-path allowlist guard as `analyze-plant`.
 
@@ -206,7 +206,7 @@ Smallest credible version — no new AI surface, just making existing knowledge 
 ### Phase 4 — Web push (the assistant reaches out)  `P1 · target v1.9.0`
 
 - Service worker + `Notification`/`PushManager` opt-in from Settings ("Care reminders") — explain iOS requires the installed (A2HS) app. Store subscriptions in new table `push_subscriptions` (Appendix A).
-- Sender: scheduled Supabase Edge Function (`send-care-push`, daily ~9am local — document the cron mechanism the current CLI supports; Vercel Cron hitting the function is the fallback) that finds, per user: overdue care tasks + `care_recommendations` due today (incl. diagnosis follow-ups), and sends **one digest push** ("2 plants need you: water Mabel, recheck Big Fern's leaves") via `web-push` with VAPID keys in Supabase secrets.
+- Sender: scheduled Supabase Edge Function (`send-care-push`, daily ~9am local; decided mechanism: **pg_cron + pg_net** invoking the function — verify the extensions are enabled; fallback: Vercel Cron with a shared-secret header) that finds, per user: overdue care tasks + `care_recommendations` due today (incl. diagnosis follow-ups), and sends **one digest push** ("2 plants need you: water Mabel, recheck Big Fern's leaves") via `web-push` with VAPID keys in Supabase secrets.
 - Hard rules: max 1 push/day; nothing when there's nothing due; deep-link to Today.
 
 **Acceptance:** opt-in→subscription row; overdue plant produces next-morning digest on desktop + installed iOS PWA; revoking permission cleans up the row; no push on quiet days. Manual steps flagged: VAPID secret generation, cron setup, function deploy.
@@ -216,7 +216,7 @@ Smallest credible version — no new AI surface, just making existing knowledge 
 - **(P0 slice) Species identity verification.** The `is_name_verified` column is confirmed live in production (verified 2026-06-10) — no migration needed, code only. Plant Detail dossier: species row gains a quiet `Confirm` chip when unverified → sets `is_name_verified=true`; manual species edits set it too; verified rows show a small mono "VERIFIED" tag. Add Plant step 1: AI identification shows "AI-identified — tap to confirm or correct" beneath the result. `analyze-plant` context gains one line: identity verified vs AI-assumed (lets the model hedge species-specific claims when unverified).
 - **Species fact flagging.** `species_profile_flags` table (Appendix A) + a "Report an issue" affordance on each species-guide section (field, optional note). Flags are for Kyle's review (a simple list under Settings → flagged facts); no auto-correction.
 - **Toxicity caution line.** Wherever toxicity renders, a one-line mono caption: "AI-generated — verify with your vet for pet-critical decisions." (Honest authority beats implied authority.)
-- **Provider consolidation.** Pending the open question below: remove the Gemini branches and the `AI_PROVIDER` switch, or document it as frozen/unsupported. Either way, stop the half-state.
+- **Provider consolidation (decided).** Remove the Gemini branches, the `AI_PROVIDER` switch, and the Supabase secret. Claude is the sole provider; update `docs/EDGE-FUNCTIONS.md` and `CLAUDE.md` accordingly.
 
 **Acceptance:** confirm flow round-trips to DB and survives reload; unverified→verified reflected in the next analysis's prompt context; flags persist and list correctly; toxicity caption on Explore + species guide + Plant Detail.
 
@@ -234,15 +234,15 @@ Recommended Claude Code sessions: **Session A = Phase 1 + Phase 5 identity slice
 
 Diagnosis sessions on Sonnet: roughly 3–6k input tokens/turn (context + image) + ~500 output → on the order of **$0.05–0.15 per full session** at current Sonnet pricing — negligible at solo-use volume, and the accuracy delta on the highest-stakes path is exactly what the vision pays for. Keep Haiku for `identify-species`/`suggest-species`/`fetch-species-info` (volume paths, lower stakes). Revisit only if usage patterns change.
 
-### Open questions
+### Open questions — all resolved (decisions recorded 2026-06-10)
 
-| # | Question | Owner | Blocking? |
+| # | Question | Decision |
 |---|---|---|---|
-| 1 | Retire Gemini entirely (delete branches + secret) vs freeze-and-document? Recommendation: retire — one voice, one quality bar, less code. | Kyle | Blocks only Phase 5's last item |
-| 2 | Exact Sonnet model string at implementation time (this spec assumes `claude-sonnet-4-6`). | Implementing session (check docs) | Blocks Phase 2 deploy |
-| 3 | ~~Is the `is_name_verified` column live in production?~~ **Resolved 2026-06-10: yes** — boolean, default false, confirmed via production SQL. Phase 5 slice is code-only. | — | No |
-| 4 | Supabase scheduled functions availability on current plan/CLI vs Vercel Cron for the push sender. | Implementing session (verify, then choose) | Blocks Phase 4 only |
-| 5 | Should "Done" on a recommendation that maps to no care-log type (e.g., "move the plant") write a `moved` log automatically? Recommendation: yes when unambiguous, else skip. | Kyle (taste call) | No — default to recommendation |
+| 1 | Gemini: retire or freeze? | **Retire.** Delete the Gemini branches, the `AI_PROVIDER` switch, and the Supabase secret in Phase 5. Claude is the sole provider; git history preserves the old paths. |
+| 2 | Diagnosis model | **`claude-sonnet-4-6`** (current Sonnet as of 2026-06-10). Sanity-check the string only if significant time has passed before Phase 2. Upgrade path if verdict quality disappoints: Opus — a one-line change by design. |
+| 3 | Is `is_name_verified` live in production? | **Yes** — boolean, default false, confirmed via production SQL 2026-06-10. Phase 5 identity slice is code-only. |
+| 4 | Push scheduler | **pg_cron + pg_net inside Supabase** (verify both extensions are enabled under Database → Extensions; available on free tier). Fallback if blocked: Vercel Cron daily, hitting the function with a shared-secret header. |
+| 5 | "Done" auto-logging | **Yes, conservative map only:** move→`moved`, prune→`pruned`, mist→`misted`, pest treatment→`pest_treatment` (water/feed already map). Write "via assistant" in the log notes. Ambiguous action → no log, resolve the recommendation only. |
 
 ---
 

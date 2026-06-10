@@ -117,7 +117,7 @@ create policy "Users manage own diagnoses" on diagnoses
   for all using (auth.uid() = user_id);
 ```
 
-### `care_recommendations` *(v1.6.0 — Phase 1 of docs/ASSISTANT-SPEC.md; **migration pending production**)*
+### `care_recommendations` *(v1.6.0 — Phase 1 of docs/ASSISTANT-SPEC.md; **applied in production 2026-06-10** — verified: 14 columns, RLS on, 1 policy)*
 
 Structured next steps proposed by the assistant. Created by the **client** after an AI
 analysis (one row per action, plus one carrying an `interval_suggestion` when present);

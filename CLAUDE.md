@@ -275,7 +275,7 @@ Floating pill with four tabs: **Today / Plants / Explore / Me**, plus an accent-
 - id, user_id, parent_plant_id, child_plant_id (nullable), recipient_name (nullable)
 - taken_on (date), status (CHECK: rooting/thriving/failed/unknown, default rooting), note (nullable)
 
-`care_recommendations` *(v1.6.0 — assistant Phase 1; full SQL in `docs/DATABASE.md`; **migration pending production**)*
+`care_recommendations` *(v1.6.0 — assistant Phase 1; full SQL in `docs/DATABASE.md`; **applied in production 2026-06-10** — verified: 14 columns, RLS on, 1 policy)*
 - id, plant_id, user_id, created_at, resolved_at (nullable)
 - source (CHECK: analysis/diagnosis/seasonal), source_id (uuid, nullable — the analysis row)
 - action (imperative text), rationale (nullable), urgency (CHECK: now/soon/routine), due_date (nullable date)

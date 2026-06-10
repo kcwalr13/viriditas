@@ -145,6 +145,7 @@ The AI provider is controlled by the `AI_PROVIDER` Supabase secret (`claude` or 
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Auth/session model, two-layer plant profiles, the AI pipeline |
 | [docs/DATABASE.md](docs/DATABASE.md) | Schema reference: tables, columns, constraints, RLS, indexes, migrations |
 | [docs/EDGE-FUNCTIONS.md](docs/EDGE-FUNCTIONS.md) | API reference for the four Edge Functions |
+| [docs/ASSISTANT-SPEC.md](docs/ASSISTANT-SPEC.md) | Product assessment + phased spec for the v2 AI care assistant (implementation handoff) |
 | [CLAUDE.md](CLAUDE.md) | Working notes for AI coding sessions: conventions, gotchas, version history |
 | [ROADMAP.md](ROADMAP.md) | Current state, priorities, and development history |
 | [CHANGELOG.md](CHANGELOG.md) | Per-version release notes |

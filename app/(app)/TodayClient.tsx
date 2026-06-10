@@ -32,10 +32,22 @@ interface Props {
 }
 
 export default function TodayClient({ cards, streak, journalPeek, tendedToday, activityDays, weeklyLogs }: Props) {
+  // The server renders this component in UTC (Vercel), then the browser
+  // hydrates it in the user's local timezone. Any value derived from
+  // `new Date()` during render can therefore differ between the two and
+  // trigger React hydration error #418 — e.g. after 8 PM Eastern the server
+  // is already on tomorrow's date, and the greeting hour bucket differs.
+  // Fix: `now` starts null, so SSR and the first client render are identical;
+  // an effect sets it after mount, when local-time values are safe to show.
+  const [now, setNow] = useState<Date | null>(null)
+  useEffect(() => { setNow(new Date()) }, [])
+
   // Build 14-day activity grid: array of { dateStr, active } from oldest (13 days ago) to today.
   const activitySet = new Set(activityDays)
   const activityGrid = Array.from({ length: 14 }, (_, i) => {
-    const d = new Date()
+    // Pre-mount: neutral placeholder cells, identical on server and client.
+    if (!now) return { dateStr: `cell-${i}`, active: false, isToday: false }
+    const d = new Date(now)
     d.setDate(d.getDate() - (13 - i))
     const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
     return { dateStr, active: activitySet.has(dateStr), isToday: i === 13 }
@@ -112,9 +124,10 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
   let sNum = 0
   const nextSec = () => `§ ${String(++sNum).padStart(2, '0')}`
 
-  const dateStr = new Date().toLocaleDateString('en-US', {
-    weekday: 'long', month: 'long', day: 'numeric',
-  })
+  // Masthead date + season tag — empty until mounted (see hydration note above).
+  const mastheadDate = now
+    ? ` · ${now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}${seasonTag(now)}`
+    : ''
 
   async function quickLog(plantId: string, type: 'watered' | 'fertilized') {
     const key = `${plantId}-${type}`
@@ -147,9 +160,10 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
       const supabase = createClient()
       const { data: { session } } = await supabase.auth.getSession()
       if (!session) return
-      const now = new Date().toISOString()
+      // Named loggedAt (not `now`) to avoid shadowing the mounted-clock state above.
+      const loggedAt = new Date().toISOString()
       await supabase.from('care_logs').insert(
-        targets.map(c => ({ plant_id: c.plant.id, user_id: session.user.id, type, logged_at: now }))
+        targets.map(c => ({ plant_id: c.plant.id, user_id: session.user.id, type, logged_at: loggedAt }))
       )
       showToast(type === 'watered'
         ? `Watered ${targets.length} ${targets.length === 1 ? 'plant' : 'plants'}`
@@ -190,7 +204,7 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
 
   // ── Empty state (no plants yet) ───────────────────────────────────────
   if (cards.length === 0) {
-    return <EmptyState />
+    return <EmptyState now={now} />
   }
 
   return (
@@ -198,16 +212,10 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
       {/* ── Masthead ──────────────────────────────────────────────────── */}
       <div className="px-5 pt-10 pb-3.5">
         <div className="font-mono text-[10px] tracking-[0.24em] uppercase text-ink-muted mb-2.5">
-          Vol. I · {dateStr}{(() => {
-            const m = new Date().getMonth() + 1
-            if ([3, 4, 5].includes(m))  return ' · Spring'
-            if ([6, 7, 8].includes(m))  return ' · Summer'
-            if ([9, 10, 11].includes(m)) return ' · Autumn'
-            return ' · Winter'
-          })()}
+          Vol. I{mastheadDate}
         </div>
         <BigTitle>
-          {greeting()}.<br />
+          {greeting(now)}.<br />
           <span className="italic text-accent">
             {totalTodo === 0 && unscheduled.length === cards.length
               ? 'Set up a care schedule.'
@@ -239,7 +247,8 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
               {streak}-day care streak
             </div>
             <div className="text-[11px] text-ink-soft mt-px">
-              You tended a plant every day since {streakSince(streak)}.
+              {/* nbsp fallback keeps the line height stable during the pre-mount frame */}
+              {now ? `You tended a plant every day since ${streakSince(streak, now)}.` : '\u00A0'}
             </div>
           </div>
           <Icon name="chev" size={16} className="text-ink-muted" />
@@ -259,7 +268,8 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
       </div>
       <div className="mx-5 flex justify-between mt-1">
         <span className="font-mono text-[9px] tracking-[0.08em] uppercase text-ink-muted">
-          {activityGrid.filter(d => d.active).length} active day{activityGrid.filter(d => d.active).length === 1 ? '' : 's'}
+          {/* counts come from the placeholder grid until mounted, so hold the label */}
+          {now ? `${activityGrid.filter(d => d.active).length} active day${activityGrid.filter(d => d.active).length === 1 ? '' : 's'}` : '\u00A0'}
         </span>
         <span className="font-mono text-[9px] tracking-[0.08em] uppercase text-ink-muted">
           {weeklyLogs > 0 ? `${weeklyLogs} log${weeklyLogs === 1 ? '' : 's'} · this week` : 'today'}
@@ -506,7 +516,8 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
               )}
               <div className="p-4 flex-1 min-w-0">
                 <div className="font-mono text-[9px] tracking-[0.16em] text-ink-muted uppercase mb-1.5">
-                  {relativeTime(journalPeek.createdAt)} · {journalPeek.plantNickname}
+                  {/* relative time waits for mount — SSR vs hydration can land in different time buckets */}
+                  {now ? `${relativeTime(journalPeek.createdAt)} · ` : ''}{journalPeek.plantNickname}
                   {journalPeek.plantSpecies && ` · ${journalPeek.plantSpecies}`}
                 </div>
                 <div className="font-serif text-[17px] leading-[1.4] text-ink italic" style={{ textWrap: 'pretty' as React.CSSProperties['textWrap'] }}>
@@ -737,14 +748,15 @@ function TaskRow({
 }
 
 // ─── Empty state (onboarding) ──────────────────────────────────────────
-function EmptyState() {
+// Receives `now` from TodayClient — null during SSR (see hydration note there).
+function EmptyState({ now }: { now: Date | null }) {
   return (
     <div className="px-5 pt-10 pb-8">
       <div className="font-mono text-[10px] tracking-[0.24em] uppercase text-ink-muted mb-2.5">
         Vol. I · Welcome
       </div>
       <BigTitle>
-        {greeting()}.<br />
+        {greeting(now)}.<br />
         <span className="italic text-accent">Let&rsquo;s meet your first plant.</span>
       </BigTitle>
 
@@ -786,8 +798,13 @@ function EmptyState() {
 }
 
 // ─── helpers ───────────────────────────────────────────────────────────
-function greeting(): string {
-  const h = new Date().getHours()
+// These take the mounted `now` value instead of calling `new Date()`
+// themselves, so nothing time-dependent renders during SSR — see the
+// hydration note at the top of TodayClient.
+
+function greeting(d: Date | null): string {
+  if (!d) return 'Hello' // pre-mount fallback, identical on server and client
+  const h = d.getHours()
   if (h < 5)  return 'Late night'
   if (h < 12) return 'Good morning'
   if (h < 17) return 'Good afternoon'
@@ -795,8 +812,16 @@ function greeting(): string {
   return 'Good night'
 }
 
-function streakSince(days: number): string {
-  const d = new Date()
+function seasonTag(d: Date): string {
+  const m = d.getMonth() + 1
+  if ([3, 4, 5].includes(m))   return ' · Spring'
+  if ([6, 7, 8].includes(m))   return ' · Summer'
+  if ([9, 10, 11].includes(m)) return ' · Autumn'
+  return ' · Winter'
+}
+
+function streakSince(days: number, from: Date): string {
+  const d = new Date(from)
   d.setDate(d.getDate() - days + 1)
   return d.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })
 }

@@ -372,7 +372,7 @@ When adding a new field to one of these context types, update three places: the 
 - **"Back to results" button**: shown on profile view when there are suggestions in state; clears profile and re-displays the grid without a new API call
 
 ### New Sub-screens (Camera, Timelapse, Diagnose, Lineage)
-These screens require two SQL migrations not yet applied in production. Both screens gracefully handle missing tables (diagnoses/propagations return an empty state with a setup notice rather than crashing). Run both in the Supabase SQL editor before relying on the save functionality:
+These screens require two SQL migrations — both applied in production on 2026-06-09 (tables live with RLS enabled). Both screens gracefully handle missing tables (diagnoses/propagations return an empty state with a setup notice rather than crashing). Run both in the Supabase SQL editor before relying on the save functionality:
 
 **`diagnoses` table:**
 ```sql
@@ -433,3 +433,4 @@ Use **semantic versioning** (MAJOR.MINOR.PATCH):
 - `1.3.0` — P1/P2 backlog: password reset, storage cleanup on delete, re-analyze gate, species cache invalidation, log pagination, Quick Add Note sheet, streak strip navigation, Add Plant autocomplete, Explore real categories
 - `1.4.0` — Camera, Timelapse, Diagnose, and Lineage screens; camera FAB; § 08 Tools strip on Plant Detail
 - `1.5.0` — Review remediation: fixed the lint error that was failing every Vercel build since 1.4.0 (production was stuck on 1.3.0 — the cause of the "missing" Tools strip and /camera 404); Edge Function auth + SSRF/cache-poisoning hardening; Today hydration fix; password-reset routes whitelisted in middleware; toxicity label fix; streak badge, schedule chips, stat colors, Add Plant validation, Invalid Date fixes; custom 404 page
+- `1.5.1` — Fixed the remaining Today hydration error (#418): masthead date/season, greeting, streak-since text, activity grid, and journal-peek relative time were all computed from `new Date()` in the render body, so Vercel's UTC server render diverged from the browser's local-time render after 8 PM Eastern. `TodayClient` now keeps a `now: Date | null` state set in a mount effect; time-derived strings render deterministic fallbacks until it's set. Pattern note: never call `new Date()` (or read the clock any other way) in the render body of a client component that gets server-rendered.

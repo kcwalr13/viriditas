@@ -29,7 +29,7 @@ Kyle is a beginner developer who relies on Claude to write most of the code. Alw
 | Auth | Supabase Auth via `@supabase/ssr` (cookie-based, SSR-safe) |
 | Database | Supabase (PostgreSQL) |
 | File/Photo Storage | Supabase Storage |
-| AI Integration | Supabase Edge Functions → Claude API (`claude-haiku-4-5-20251001`; Gemini also supported via `AI_PROVIDER` secret) |
+| AI Integration | Supabase Edge Functions → Claude API (`claude-haiku-4-5-20251001`; Gemini supported on `analyze-plant`/`fetch-species-info` via `AI_PROVIDER` secret) |
 | Deployment | Vercel (auto-deploys on every push to main) |
 
 **Language:** TypeScript throughout. No `any` types.
@@ -39,13 +39,16 @@ Kyle is a beginner developer who relies on Claude to write most of the code. Alw
 viriditas/
   app/
     layout.tsx              # Root layout: metadata, Google Fonts preconnect, PWA viewport
-    globals.css             # Tailwind base + font imports (Source Serif 4, Inter, JetBrains Mono) + scrollbar-hide
+    globals.css             # Tailwind base + font imports (Source Serif 4, Inter, JetBrains Mono) + vr-scroll scrollbar hiding
+    not-found.tsx           # Custom 404 — editorial paper/ink treatment, outside the route groups
     (auth)/
       layout.tsx            # Unauthenticated layout (centered card)
       sign-in/page.tsx      # Sign in form
       sign-up/page.tsx      # Sign up form
+      forgot-password/page.tsx  # Sends the password-reset email (resetPasswordForEmail)
+      auth/page.tsx         # Reset-link landing page — exchanges the PKCE code, sets new password
     (app)/
-      layout.tsx            # Protected layout: auth guard + floating <BottomNav/>
+      layout.tsx            # Protected layout: auth guard + <NavGuard/> (floating BottomNav)
       page.tsx              # Today — Server Component (fetches plants + builds tasks, streak, journal peek)
       TodayClient.tsx       # Today — Client Component (masthead, task list, collection strip, journal peek)
       plants/
@@ -53,19 +56,24 @@ viriditas/
         PlantsClient.tsx     # Plants collection — Client (grid/list toggle, grouping chips)
       add-plant/
         page.tsx             # Add Plant — 3-step wizard (identify → place → schedule)
+      camera/
+        page.tsx             # Camera capture + confirm sheet (FAB target; full-screen, nav hidden)
       plant/
         [id]/
           page.tsx           # Plant Detail — Client Component; single-scroll editorial layout
+          timelapse/page.tsx # Growth filmstrip — scrubber, play/pause, filmstrip thumbnails
+          diagnose/page.tsx  # Branching diagnostic flow — 11 static verdicts, saves to diagnoses
+          lineage/page.tsx   # Propagation graph — CRUD on propagations table
       explore/
         page.tsx             # Explore/Field Guide — category grid, featured carousel, search, species detail
       settings/
-        page.tsx             # Me — identity, sign out, about
+        page.tsx             # Me — identity, sign out, about (shows package.json version)
   components/
-    Icon.tsx                # <Icon name="drop"/> — 40 single-stroke SVGs; replaces all emoji
+    Icon.tsx                # <Icon name="drop"/> — 38 single-stroke SVGs; replaces all emoji
     PlantPhoto.tsx          # Warm blocky gradient placeholder when no cover photo (deterministic from name)
     ui.tsx                  # StatusPip, Chip, BigTitle, SectionLabel, HairlineButton
-    BottomNav.tsx           # Floating pill nav: Today / Plants / Explore / Me
-    NavGuard.tsx            # Wraps BottomNav — hides it on /plant/[id] and /add-plant
+    BottomNav.tsx           # Floating pill nav: Today / Plants / Explore / Me + camera FAB (routes to /camera)
+    NavGuard.tsx            # Wraps BottomNav — hides it on /plant/*, /add-plant, and /camera
   lib/
     supabase/
       client.ts             # Browser Supabase client
@@ -81,12 +89,20 @@ viriditas/
       suggest-species/       index.ts   # Edge Function: 4-6 candidate species for a query
   scripts/
     patch-ua-parser.js      # Prebuild patch for ua-parser-js in Edge Runtime
+  docs/
+    SETUP.md                # Zero-to-running guide (Supabase project, secrets, deploys, Vercel)
+    ARCHITECTURE.md         # Auth/session model, two-layer plant profile, AI pipeline
+    DATABASE.md             # Schema reference — tables, columns, constraints, RLS, migrations
+    EDGE-FUNCTIONS.md       # API reference for the four Edge Functions
   public/
-    icon.png                # App icon
+    icon.png                # App icon (PWA)
+    icon-192.png            # 192×192 PWA icon
+    favicon.png             # Browser tab icon
     manifest.json           # PWA manifest
-  middleware.ts             # Auth-gates /(app); refreshes session cookies
+  middleware.ts             # Auth-gates /(app); refreshes session cookies; whitelists password-reset routes
   next.config.ts            # Supabase Storage image domain allowlist
   tailwind.config.ts        # Editorial palette (paper/ink/accent) + font families
+  CHANGELOG.md              # Per-version history (mirrors the Versioning Convention section below)
   .env.local                # Gitignored — NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY
 ```
 
@@ -103,7 +119,7 @@ viriditas/
 - [x] `app/(app)/add-plant/page.tsx` — Add Plant: 3-step wizard (identify → place → schedule). Step 1 uses `identify-species` for AI photo ID; plant row is created at step 3 submit.
 - [x] `app/(app)/explore/page.tsx` — Field Guide: AI Identify hero, category grid, featured carousel, recently-viewed (localStorage), text + photo search into species detail
 - [x] `app/(app)/settings/page.tsx` — Me: identity card, sign out, about
-- [x] `components/Icon.tsx` — 40 single-stroke SVGs replacing every emoji in the UI (added: `ruler`)
+- [x] `components/Icon.tsx` — 38 single-stroke SVGs replacing every emoji in the UI
 - [x] `components/ui.tsx` — BigTitle, SectionLabel, Chip, StatusPip, HairlineButton
 - [x] `components/BottomNav.tsx` — floating pill with route-based active state + camera FAB (accent-colored, floats above-right of nav; routes to `/camera`)
 - [x] `components/NavGuard.tsx` — wraps BottomNav, hides on `/plant/[id]`, `/add-plant`, and `/camera`
@@ -123,7 +139,8 @@ viriditas/
 - [x] Plant Detail `§ 08 · Tools` strip — three ToolTile cards linking to Time-lapse, Diagnose, and Lineage sub-screens
 
 ## What Comes Next
-See `ROADMAP_CURRENT.md` for known gaps, priorities, and suggested next steps.
+See `ROADMAP.md` for the current state, known gaps, priorities, and development history.
+(`ROADMAP_CURRENT.md` was merged into `ROADMAP.md` on 2026-06-10 and no longer exists.)
 
 ## Plant Profile Architecture
 Each plant has two layers of information:
@@ -131,13 +148,13 @@ Each plant has two layers of information:
 **Layer 1 — Personal data (user-specific, evolves over time):**
 - Nickname, notes, location, pot size, acquisition date, last repotted date, photos
 - AI health analyses and species identifications
-- Care logs (watered, fertilized, note, repotted, pruned, misted, pest_treatment, moved)
-- Watering reminder interval (stored in DB, shown as urgency badge in the grid)
+- Care logs (watered, fertilized, note, repotted, pruned, misted, pest_treatment, moved, measured)
+- Watering + fertilizing reminder intervals (stored in DB, shown as urgency badges in the grid)
 
 **Layer 2 — Species reference data (encyclopedic, fetched once and cached permanently):**
 - Generated by `fetch-species-info` Edge Function using the Claude API when a species is identified
 - Stored in `species_profiles` table, keyed by species name, shared across all users
-- Covers: light, watering, humidity, soil, temperature, toxicity, common problems, growth habits, propagation
+- Covers: light, watering, humidity, soil, temperature, toxicity, common problems, growth habits, propagation, pruning tips, disease symptoms, seasonal care
 - Fetched at most once per species globally — cached instantly for any subsequent user with the same plant
 - Refreshable by the user on demand
 - Passed as context to `analyze-plant` so health analyses are species-aware
@@ -171,7 +188,7 @@ journal — warm paper backgrounds, olive accents, serif display type. **No emoj
 Fonts are loaded from Google Fonts in `app/globals.css` with a preconnect in `app/layout.tsx`.
 
 ### Icons
-- `components/Icon.tsx` exports 39 single-stroke SVG icons (leaf, drop, sun, scissors, mist, bug, move, camera, plus, check, chev, back, search, home, book, cog, calendar, edit, trash, dots, sparkle, flame, thermometer, humidity, soil, warning, room, pot, clock, heart, close, filter, grid, list, etc.).
+- `components/Icon.tsx` exports 38 single-stroke SVG icons. The full set (the `IconName` union in that file is the source of truth): leaf, drop, sun, scissors, mist, bug, move, camera, plus, check, chev, chev-down, back, search, home, book, cog, calendar, edit, trash, dots, sparkle, flame, arrow-up, arrow-right, thermometer, humidity, soil, warning, room, pot, clock, heart, close, filter, grid, list, ruler.
 - Usage: `<Icon name="drop" size={16} className="text-accent" stroke={1.8}/>`.
 - Color via `className` text color (SVG `stroke` uses `currentColor`).
 
@@ -186,7 +203,7 @@ Fonts are loaded from Google Fonts in `app/globals.css` with a preconnect in `ap
 Plants without cover photos show a warm blocky gradient. Colors are deterministic from the plant's id or nickname (`paletteFor(key)`), so the same plant always gets the same hue. Used for both grid cards and placeholder hero images.
 
 ### Bottom nav (`components/BottomNav.tsx` + `NavGuard.tsx`)
-Floating pill with four tabs: **Today / Plants / Explore / Me**. Active tab shows the label; inactive tabs show just the icon. Route matching: `/plant/[id]` and `/add-plant` highlight **Plants**. The layout renders `<NavGuard/>` which hides the nav entirely on Plant Detail and Add Plant screens.
+Floating pill with four tabs: **Today / Plants / Explore / Me**, plus an accent-colored camera FAB floating above-right of the pill that routes to `/camera`. Active tab shows the label; inactive tabs show just the icon. Route matching: `/plant/[id]` and `/add-plant` highlight **Plants**. The layout renders `<NavGuard/>` which hides the nav entirely on Plant Detail, Add Plant, and Camera screens.
 
 ### Screen conventions
 - **Masthead pattern:** every top-level screen opens with a mono caption ("Vol. I · Saturday, April 18" style) then a `<BigTitle/>` with an italic-accent tail — e.g. "Good morning. *2 plants need you.*"
@@ -245,6 +262,23 @@ Floating pill with four tabs: **Today / Plants / Explore / Me**. Active tab show
 - pruning_tips (nullable), disease_symptoms (nullable), seasonal_care (nullable)
 - fetched_at, updated_at
 
+`diagnoses` *(added 2026-06-09 — see "New Sub-screens" below for the full SQL)*
+- id, plant_id, user_id, created_at
+- question_path (jsonb), verdict_id, verdict_title, confidence, reasoning (text[]), next_steps (jsonb)
+
+`propagations` *(added 2026-06-09 — see "New Sub-screens" below for the full SQL)*
+- id, user_id, parent_plant_id, child_plant_id (nullable), recipient_name (nullable)
+- taken_on (date), status (CHECK: rooting/thriving/failed/unknown, default rooting), note (nullable)
+
+> **Full schema reference** — column types, constraints, RLS policies, indexes, and the
+> consolidated migration SQL live in `docs/DATABASE.md`. Keep both in sync when the schema changes.
+
+> **`is_name_verified` (TODO — unverified):** `lib/types.ts` declares an optional
+> `is_name_verified?: boolean` on `Plant`, and a migration for it was written on 2026-04-19
+> (`ALTER TABLE plants ADD COLUMN IF NOT EXISTS is_name_verified boolean DEFAULT false;`),
+> but whether that migration was ever applied in production is not verifiable from this repo.
+> No app code reads or writes the column yet. Confirm against the live database before using it.
+
 **care_logs type constraint** — allowed values: `watered`, `fertilized`, `note`, `repotted`, `pruned`, `misted`, `pest_treatment`, `moved`, `measured`. To add new types:
 ```sql
 ALTER TABLE care_logs DROP CONSTRAINT IF EXISTS care_logs_type_check;
@@ -279,6 +313,7 @@ ALTER TABLE care_logs ADD CONSTRAINT care_logs_type_check CHECK (type IN (...all
 - The browser client (`lib/supabase/client.ts`) uses `createBrowserClient`
 - The server client (`lib/supabase/server.ts`) uses `createServerClient` with cookie helpers
 - `middleware.ts` handles session refresh on every request and gates `/(app)` routes
+- **Public (no-session) routes** are exactly: `/sign-in`, `/sign-up`, `/forgot-password`, `/auth`. The last two are the password-reset flow — the reset email lands on `/auth`, which must load while signed out so the one-time PKCE code can be exchanged. Only `/sign-in` and `/sign-up` bounce already-signed-in users to home; `/auth` deliberately does not, so a signed-in user clicking a reset link still reaches the form (v1.5.0)
 - After sign-out, call `router.push('/sign-in')` and `router.refresh()` — the middleware handles the rest
 - `middleware.ts` uses `getUser()` (not `getSession()`) to validate sessions server-side
 - Supabase email confirmation is currently disabled (for development); re-enable before launch
@@ -287,7 +322,9 @@ ALTER TABLE care_logs ADD CONSTRAINT care_logs_type_check CHECK (type IN (...all
 - Always get the session first: `const { data: { session } } = await supabase.auth.getSession()`
 - Pass the token explicitly: `headers: { Authorization: \`Bearer ${session.access_token}\` }`
 - This is required because `supabase.functions.invoke` doesn't always inject the token reliably
-- Edge Functions are deployed with `--no-verify-jwt` flag; they do their own auth via the passed token
+- Edge Functions are deployed with `--no-verify-jwt` flag; **all four validate the token themselves** by calling `supabase.auth.getUser()` with the forwarded Authorization header and returning 401 when it's missing or invalid (hardened in v1.5.0)
+- Additional v1.5.0 hardening: `analyze-plant` rejects any `imageUrl` outside this project's `plant-photos` storage bucket (SSRF guard); `fetch-species-info` maps AI output field-by-field onto the schema instead of spreading untrusted JSON into the upsert; `identify-species` enforces a MIME allowlist (jpeg/png/webp/gif)
+- Full request/response shapes, error codes, and deploy commands: see `docs/EDGE-FUNCTIONS.md`
 
 ### Photo Uploads
 - Use `<input type="file" accept="image/*" capture="environment">` for camera/library access on mobile
@@ -305,6 +342,7 @@ ALTER TABLE care_logs ADD CONSTRAINT care_logs_type_check CHECK (type IN (...all
 - Controlled by the `AI_PROVIDER` Supabase secret (`claude` or `gemini`)
 - Requires Edge Function redeploy after changing
 - Current: `claude` using `claude-haiku-4-5-20251001`
+- **Provider support is per-function:** only `analyze-plant` and `fetch-species-info` implement the Gemini path (`gemini-2.5-flash`). `identify-species` and `suggest-species` call Claude directly regardless of `AI_PROVIDER`.
 - Base64 encoding in Edge Functions: use Deno's std library (`import { encode as encodeBase64 } from 'https://deno.land/std@0.168.0/encoding/base64.ts'`)
 
 ### Analyze-Plant Context (Phase 15 — Gaps 1, 2, 3, 5)
@@ -344,9 +382,9 @@ When adding a new field to one of these context types, update three places: the 
 - `lib/utils.ts` exports `computeStreak(logTimestamps: string[])` (current streak) and `computeMaxStreak()` (all-time best)
 
 ### Enriching Plant List Data Efficiently
-- Fetch plants, then fetch photos and care_logs with `.in('plant_id', plantIds)` — 3 total queries regardless of collection size
+- Fetch plants, then fetch photos and care_logs with `.in('plant_id', plantIds)` — 3 total queries regardless of collection size (photos + care_logs run in a `Promise.all`)
 - Build lookup maps in JavaScript (first occurrence per plant_id = most recent, since queries are ordered descending)
-- See `app/(app)/page.tsx` for the reference implementation
+- See `app/(app)/page.tsx` (Today; adds a 4th query for the streak history) and `app/(app)/plants/page.tsx` for the reference implementations
 
 ### Plant Detail Screen Architecture
 - `app/(app)/plant/[id]/page.tsx` is a Client Component — all data is fetched client-side via the browser Supabase client
@@ -357,7 +395,7 @@ When adding a new field to one of these context types, update three places: the 
 ### NavGuard Pattern
 - `components/NavGuard.tsx` is a client component that wraps `<BottomNav/>` and hides it on certain routes
 - Used in `app/(app)/layout.tsx` in place of `<BottomNav/>` directly
-- Currently hidden on: `/add-plant` (full-screen wizard) and any path starting with `/plant/` (has its own care dock)
+- Currently hidden on: `/add-plant` (full-screen wizard), `/camera` (full-screen capture), and any path starting with `/plant/` (has its own care dock)
 - To add a new route that should hide the nav: add it to the `HIDDEN_ROUTES` array in `NavGuard.tsx`
 - This avoids the `usePathname()` hook living in the Server Component layout (it can only run in Client Components)
 
@@ -372,7 +410,12 @@ When adding a new field to one of these context types, update three places: the 
 - **"Back to results" button**: shown on profile view when there are suggestions in state; clears profile and re-displays the grid without a new API call
 
 ### New Sub-screens (Camera, Timelapse, Diagnose, Lineage)
-These screens require two SQL migrations — both applied in production on 2026-06-09 (tables live with RLS enabled). Both screens gracefully handle missing tables (diagnoses/propagations return an empty state with a setup notice rather than crashing). Run both in the Supabase SQL editor before relying on the save functionality:
+The Diagnose and Lineage screens are backed by two tables, `diagnoses` and `propagations`.
+**Both migrations were applied in production on 2026-06-09 — the tables are live with RLS
+enabled, and no action is needed on the production database.** The SQL below is kept as
+reference for setting up a fresh Supabase project (it also lives in `docs/DATABASE.md`).
+Both screens gracefully handle missing tables — on a database without them, Diagnose and
+Lineage show an empty state with a setup notice rather than crashing.
 
 **`diagnoses` table:**
 ```sql
@@ -425,6 +468,9 @@ Use **semantic versioning** (MAJOR.MINOR.PATCH):
 - **MAJOR** (`1.x.x`) — stays at 1 until a breaking data-schema change or full redesign
 - **MINOR** (`x.N.x`) — bump once per session that ships user-facing features; each meaningful feature session = +1
 - **PATCH** (`x.x.N`) — bump for bug-fix-only sessions (no new user-visible features)
+- **Documentation-only sessions do not bump the version** — nothing user-facing ships, so the deployed app is unchanged.
+
+When a version bumps, also add a matching entry to `CHANGELOG.md` (the human-facing mirror of the history below).
 
 **History:**
 - `1.0.0` — initial release: core screens (Today, Plants, Plant Detail, Add Plant, Explore, Me), Editorial design system, AI edge functions

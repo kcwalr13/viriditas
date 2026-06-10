@@ -406,45 +406,56 @@ function List({ cards, quickLog, loggingId }: { cards: PlantCard[]; quickLog?: Q
                 )}
               </div>
             </Link>
-            {/* Quick-log buttons for actionable plants */}
-            {quickLog && (needsWater || needsFeed) ? (
+            {/* Quick-log buttons — one consistent cluster on every row.
+                The review flagged that buttons appeared only on actionable rows
+                (others showed pips), so the control changed shape row to row.
+                Now: water is always loggable; feed appears whenever a
+                fertilizing schedule exists. Urgency lives in the COLOR —
+                solid danger/warn when due, quiet outline when not. */}
+            {quickLog ? (
               <div className="flex gap-1 shrink-0">
-                {needsWater && (
-                  <button
-                    onClick={() => quickLog(c.plant.id, c.plant.nickname, 'watered')}
-                    disabled={!!loggingId}
-                    aria-label="Log watered"
-                    className={`w-9 h-9 rounded-full flex items-center justify-center disabled:opacity-50 ${c.wateringStatus === 'overdue' ? 'bg-danger' : 'bg-warn'}`}
-                  >
-                    {isLoggingWater
-                      ? <Icon name="clock" size={15} stroke={1.8} className="text-paper" />
-                      : <Icon name="drop" size={15} stroke={2.1} className="text-paper" />}
-                  </button>
-                )}
-                {needsFeed && (
+                <button
+                  onClick={() => quickLog(c.plant.id, c.plant.nickname, 'watered')}
+                  disabled={!!loggingId}
+                  aria-label="Log watered"
+                  className={`w-9 h-9 rounded-full flex items-center justify-center disabled:opacity-50 ${
+                    c.wateringStatus === 'overdue' ? 'bg-danger'
+                    : c.wateringStatus === 'due-soon' ? 'bg-warn'
+                    : 'bg-card border border-rule'
+                  }`}
+                >
+                  <Icon
+                    name={isLoggingWater ? 'clock' : 'drop'}
+                    size={15}
+                    stroke={needsWater ? 2.1 : 1.8}
+                    className={needsWater ? 'text-paper' : 'text-ink-soft'}
+                  />
+                </button>
+                {c.fertilizingStatus !== 'unset' && (
                   <button
                     onClick={() => quickLog(c.plant.id, c.plant.nickname, 'fertilized')}
                     disabled={!!loggingId}
                     aria-label="Log fertilized"
-                    className={`w-9 h-9 rounded-full flex items-center justify-center disabled:opacity-50 ${c.fertilizingStatus === 'overdue' ? 'bg-danger' : 'bg-warn'}`}
+                    className={`w-9 h-9 rounded-full flex items-center justify-center disabled:opacity-50 ${
+                      c.fertilizingStatus === 'overdue' ? 'bg-danger'
+                      : c.fertilizingStatus === 'due-soon' ? 'bg-warn'
+                      : 'bg-card border border-rule'
+                    }`}
                   >
-                    {isLoggingFeed
-                      ? <Icon name="clock" size={15} stroke={1.8} className="text-paper" />
-                      : <Icon name="leaf" size={15} stroke={2.1} className="text-paper" />}
+                    <Icon
+                      name={isLoggingFeed ? 'clock' : 'leaf'}
+                      size={15}
+                      stroke={needsFeed ? 2.1 : 1.8}
+                      className={needsFeed ? 'text-paper' : 'text-ink-soft'}
+                    />
                   </button>
                 )}
               </div>
             ) : (
-              <div className="flex flex-col items-end gap-1 shrink-0">
-                <div className="flex items-center gap-1">
-                  {c.wateringStatus !== 'unset' && <StatusPip status={c.wateringStatus} />}
-                  {c.fertilizingStatus !== 'unset' && <StatusPip status={c.fertilizingStatus} />}
-                </div>
-                {c.lastWateredLog && (
-                  <span className="font-mono text-[9px] text-ink-muted tracking-[0.06em]">
-                    {relativeTime(c.lastWateredLog.logged_at)}
-                  </span>
-                )}
+              /* List rendered without a quickLog handler — show status pips only. */
+              <div className="flex items-center gap-1 shrink-0">
+                {c.wateringStatus !== 'unset' && <StatusPip status={c.wateringStatus} />}
+                {c.fertilizingStatus !== 'unset' && <StatusPip status={c.fertilizingStatus} />}
               </div>
             )}
           </div>

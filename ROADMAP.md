@@ -67,7 +67,7 @@ system is applied across every screen.
 
 | Item | Status | Notes |
 |---|---|---|
-| Rotate the shared test account password | ⬜ | The old `ROADMAP_CURRENT.md` contained the test account credential in plaintext; it remains in git history even though the file is deleted. Rotate the password in Supabase Auth (or delete the account) and keep future credentials out of the repo. |
+| Test account credential in git history | ✅ | The old `ROADMAP_CURRENT.md` contained the `uitester` test-account credential in plaintext; it remains in git history even though the file is deleted. **Closed as accepted risk (Kyle, 2026-06-10):** it's a placeholder test account, the repo is private, and exposure doesn't matter. Do not re-flag in future reviews. Revisit only if the repo gains collaborators or goes public; keep future credentials out of the repo regardless. |
 | Re-enable Supabase email confirmation | ⬜ | Disabled for development convenience; required before sharing with real users. |
 | Verify / apply `is_name_verified` migration | ⬜ | `lib/types.ts` declares the optional column and the migration SQL exists (see [docs/DATABASE.md](docs/DATABASE.md)), but whether it was applied in production is unverified, and no app code uses it yet. |
 | Tag releases in git | ⬜ | Versions exist in `package.json`/CHANGELOG but there are no git tags. Optional, cheap, useful. |

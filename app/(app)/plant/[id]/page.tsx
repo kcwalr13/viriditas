@@ -19,12 +19,20 @@ import {
   CARE_LOG_LABELS,
   computeStreak,
 } from '@/lib/utils'
-import type { Plant, PlantPhoto, CareLog, AnalysisResult, SpeciesProfile, NoteCategory, MeasurementUnit } from '@/lib/types'
+import type {
+  Plant, PlantPhoto, CareLog, AnalysisResult, SpeciesProfile, NoteCategory, MeasurementUnit,
+  CareRecommendation, AnalysisAction, IntervalSuggestion, DismissedReason,
+} from '@/lib/types'
+import {
+  acceptRecommendation, completeRecommendation, dismissRecommendation,
+  applyIntervalSuggestion, insertAnalysisRecommendations,
+} from '@/lib/recommendations'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Icon, type IconName } from '@/components/Icon'
 import { BigTitle, Chip, HairlineButton, SectionLabel } from '@/components/ui'
+import { AssistantActionRow, DismissSheet, IntervalConfirmSheet } from '@/components/AssistantActionRow'
 import { PlantPhoto as PlantPhotoPlaceholder } from '@/components/PlantPhoto'
 
 // ── Care-action taxonomy ────────────────────────────────────────────────
@@ -84,6 +92,7 @@ export default function PlantDetailPage() {
   const [allAnalyses,    setAllAnalyses]    = useState<AnalysisResult[]>([])
   const [speciesProfile, setSpeciesProfile] = useState<SpeciesProfile | null>(null)
   const [relatedPlants,  setRelatedPlants]  = useState<Array<{ id: string; nickname: string }>>([])
+  const [recommendations, setRecommendations] = useState<CareRecommendation[]>([])
   const [loading,        setLoading]        = useState(true)
 
   // ── UI state ──────────────────────────────────────────────────────────
@@ -104,6 +113,12 @@ export default function PlantDetailPage() {
   const [totalCareLogs,     setTotalCareLogs]     = useState(0)
   const [loadingMoreLogs,   setLoadingMoreLogs]   = useState(false)
   const [showMeasureInput,  setShowMeasureInput]  = useState(false)
+  // Assistant recommendation state (Phase 1): which row is mutating, and
+  // which row has the dismiss / interval-confirm sheet open.
+  const [recBusyId,         setRecBusyId]         = useState<string | null>(null)
+  const [dismissTarget,     setDismissTarget]     = useState<CareRecommendation | null>(null)
+  const [intervalTarget,    setIntervalTarget]    = useState<CareRecommendation | null>(null)
+  const [verifyingSpecies,  setVerifyingSpecies]  = useState(false)
   const [editing,           setEditing]           = useState(false)
   const [saving,          setSaving]        = useState(false)
   const [deleting,        setDeleting]      = useState(false)
@@ -143,6 +158,9 @@ export default function PlantDetailPage() {
 
   const fileInputRef  = useRef<HTMLInputElement>(null)
   const heroScrollRef = useRef<HTMLDivElement>(null)
+  // What the species edit field was last set to programmatically (DB value or
+  // AI prefill). Compared against on save to detect a genuine user edit.
+  const editSpeciesBaselineRef = useRef('')
   const [heroIndex, setHeroIndex] = useState(0)
 
   function handleHeroScroll() {
@@ -167,8 +185,14 @@ export default function PlantDetailPage() {
   }, [plant?.species, latestAnalysis?.species]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Pre-fill edit form species from AI analysis when the plant has no manual species set.
+  // The baseline ref tracks what the field was programmatically set to, so
+  // handleSave can tell a real user edit apart from the untouched prefill —
+  // only the former counts as an identity assertion (is_name_verified).
   useEffect(() => {
-    if (!editSpecies && latestAnalysis?.species) setEditSpecies(latestAnalysis.species)
+    if (!editSpecies && latestAnalysis?.species) {
+      setEditSpecies(latestAnalysis.species)
+      editSpeciesBaselineRef.current = latestAnalysis.species
+    }
   }, [latestAnalysis?.species]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Close "More" dock panel when clicking outside.
@@ -180,7 +204,7 @@ export default function PlantDetailPage() {
 
   async function loadAll() {
     setLoading(true)
-    await Promise.all([fetchPlant(), fetchPhotos(), fetchCareLogs(), fetchLastWatered(), fetchAnalyses()])
+    await Promise.all([fetchPlant(), fetchPhotos(), fetchCareLogs(), fetchLastWatered(), fetchAnalyses(), fetchRecommendations()])
     setLoading(false)
   }
 
@@ -191,6 +215,7 @@ export default function PlantDetailPage() {
     setPlant(data)
     setNickname(data.nickname)
     setEditSpecies(data.species ?? '')
+    editSpeciesBaselineRef.current = data.species ?? ''
     setLocation(data.location ?? '')
     setPotSize(data.pot_size ?? '')
     setSoilType(data.soil_type ?? '')
@@ -250,6 +275,17 @@ export default function PlantDetailPage() {
   async function fetchSpeciesProfileFromDB(speciesName: string) {
     const { data } = await supabase.from('species_profiles').select('*').eq('species_name', speciesName).single()
     if (data) setSpeciesProfile(data)
+  }
+
+  // Assistant recommendations for this plant (Phase 1). Errors are swallowed
+  // so the screen still works on a database without the migration.
+  async function fetchRecommendations() {
+    const { data, error } = await supabase
+      .from('care_recommendations')
+      .select('*')
+      .eq('plant_id', id)
+      .order('created_at', { ascending: false })
+    if (!error && data) setRecommendations(data)
   }
 
   // ── Photo upload ──────────────────────────────────────────────────────
@@ -468,23 +504,30 @@ export default function PlantDetailPage() {
       if (!session) throw new Error('Not logged in')
 
       const now = new Date()
-      const hasPlantContext =
-        plant?.location || plant?.pot_size || plant?.soil_type ||
-        plant?.notes || plant?.pest_notes || plant?.last_treatment_date
+      const knownSpeciesForIdentity = plant?.species || latestAnalysis?.species
 
       const { data, error: fnError } = await supabase.functions.invoke('analyze-plant', {
         body: {
           imageUrl, previousAnalyses, recentCareLogs,
           speciesProfile: speciesProfile ?? null,  // whole row — now carries pruning_tips, disease_symptoms, seasonal_care
-          plantContext: hasPlantContext ? {
+          // Always sent now (Phase 1): the current schedules are the baseline
+          // any interval_suggestion is judged against.
+          plantContext: {
             location:            plant?.location            ?? null,
             pot_size:            plant?.pot_size            ?? null,
             soil_type:           plant?.soil_type           ?? null,
             plant_notes:         plant?.notes               ?? null,   // Gap 2
             pest_notes:          plant?.pest_notes          ?? null,   // Gap 2
             last_treatment_date: plant?.last_treatment_date ?? null,   // Gap 2
-          } : null,
+            watering_interval_days:    plant?.watering_interval_days    ?? null,  // Phase 1
+            fertilizing_interval_days: plant?.fertilizing_interval_days ?? null,  // Phase 1
+          },
           seasonContext: { month: now.getMonth() + 1, hemisphere: 'northern' },
+          // Phase 5 identity slice: verified only when the owner set/confirmed
+          // the name on the plant row — an AI-only ID is always unverified.
+          identityContext: knownSpeciesForIdentity
+            ? { verified: !!(plant?.species && plant?.is_name_verified) }
+            : null,
         },
         headers: { Authorization: `Bearer ${session.access_token}` },
       })
@@ -495,15 +538,30 @@ export default function PlantDetailPage() {
 
       const result = data.result
       const { data: { user } } = await supabase.auth.getUser()
-      await supabase.from('analysis_results').insert({
+      // .select().single() so we get the new row's id — recommendation rows
+      // link back to it via source_id.
+      const { data: analysisRow } = await supabase.from('analysis_results').insert({
         plant_id: id, user_id: user!.id, photo_id: latestPhoto.id,
         species: result.species, health: result.health,
         health_score: typeof result.health_score === 'number' ? result.health_score : null,
         care: result.care,
+      }).select().single()
+
+      // Phase 1.3: persist the structured actions as proposed recommendations.
+      // The function already sanitized them; the guards here are belt-and-braces.
+      const actions: AnalysisAction[] = Array.isArray(result.actions) ? result.actions : []
+      const intervalSuggestion: IntervalSuggestion | null = result.interval_suggestion ?? null
+      await insertAnalysisRecommendations(supabase, {
+        plantId: id,
+        userId: user!.id,
+        analysisId: analysisRow?.id ?? null,
+        actions,
+        intervalSuggestion,
       })
 
       if (result.species && !speciesProfile) fetchSpeciesProfileFromAI(result.species)
-      await fetchAnalyses()
+      await Promise.all([fetchAnalyses(), fetchRecommendations()])
+      router.refresh()  // Today's proposal section reads the same table
       showToast('Analysis complete')
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Analysis failed. Please try again.')
@@ -543,6 +601,77 @@ export default function PlantDetailPage() {
     }
   }
 
+  // ── Assistant recommendations (Phase 1) ───────────────────────────────
+  async function handleRecAccept(rec: CareRecommendation) {
+    if (recBusyId) return
+    // Interval suggestions are never applied directly — Accept opens the
+    // confirm sheet, and only the sheet's Confirm button changes the schedule.
+    if (rec.interval_suggestion) { setIntervalTarget(rec); return }
+    setRecBusyId(rec.id)
+    const ok = await acceptRecommendation(supabase, rec)
+    if (ok) { showToast('Added to your tasks'); await fetchRecommendations(); router.refresh() }
+    setRecBusyId(null)
+  }
+
+  async function handleRecDone(rec: CareRecommendation) {
+    if (recBusyId) return
+    setRecBusyId(rec.id)
+    const ok = await completeRecommendation(supabase, rec)
+    if (ok) {
+      showToast('Done')
+      // completeRecommendation may have written a care log — refresh those too.
+      await Promise.all([fetchRecommendations(), fetchCareLogs(), fetchLastWatered()])
+      router.refresh()
+    }
+    setRecBusyId(null)
+  }
+
+  async function handleRecDismiss(rec: CareRecommendation, reason: DismissedReason) {
+    if (recBusyId) return
+    setRecBusyId(rec.id)
+    const ok = await dismissRecommendation(supabase, rec, reason)
+    if (ok) { showToast('Dismissed'); await fetchRecommendations(); router.refresh() }
+    setRecBusyId(null)
+    setDismissTarget(null)
+  }
+
+  async function handleIntervalConfirm(rec: CareRecommendation) {
+    if (recBusyId) return
+    setRecBusyId(rec.id)
+    const ok = await applyIntervalSuggestion(supabase, rec)
+    if (ok) {
+      const s = rec.interval_suggestion!
+      setPlant(prev => prev
+        ? { ...prev, [s.type === 'watering' ? 'watering_interval_days' : 'fertilizing_interval_days']: s.suggested_days }
+        : prev)
+      showToast(`${s.type === 'watering' ? 'Watering' : 'Fertilizing'} set to every ${s.suggested_days}d`)
+      await fetchRecommendations()
+      router.refresh()
+    }
+    setRecBusyId(null)
+    setIntervalTarget(null)
+  }
+
+  // ── Species identity confirmation (Phase 5 slice) ─────────────────────
+  // Confirms the current name as this plant's identity: copies an AI-only ID
+  // onto plants.species and flips is_name_verified.
+  async function handleConfirmSpecies() {
+    const species = plant?.species || latestAnalysis?.species
+    if (!species || verifyingSpecies) return
+    setVerifyingSpecies(true)
+    const { error } = await supabase.from('plants')
+      .update({ species, is_name_verified: true })
+      .eq('id', id)
+    if (error) {
+      setError('Could not confirm the species name.')
+    } else {
+      setPlant(prev => prev ? { ...prev, species, is_name_verified: true } : prev)
+      setEditSpecies(species)
+      showToast('Species confirmed')
+    }
+    setVerifyingSpecies(false)
+  }
+
   // ── Edit & delete ─────────────────────────────────────────────────────
   async function handleSave() {
     if (!nickname.trim()) { setError('Nickname cannot be empty.'); return }
@@ -551,10 +680,20 @@ export default function PlantDetailPage() {
 
     const newSpecies       = editSpecies.trim() || null
     const speciesChanged   = newSpecies !== (plant?.species ?? null)
+    // Did the user actually type in the species field? Compared against the
+    // baseline (DB value or AI prefill), NOT against plant.species — an
+    // untouched AI prefill must never count as an owner assertion.
+    const speciesEdited    = editSpecies.trim() !== editSpeciesBaselineRef.current.trim()
 
     const { error } = await supabase.from('plants').update({
       nickname: nickname.trim(),
       species: newSpecies,
+      // Phase 5 identity slice: a manual species edit asserts identity —
+      // typing/changing a name verifies it, clearing the name un-verifies,
+      // and saving the form without touching the field changes nothing.
+      is_name_verified: newSpecies
+        ? (speciesEdited ? true : (plant?.is_name_verified ?? false))
+        : false,
       location: location.trim() || null,
       pot_size: potSize.trim() || null,
       soil_type: soilType.trim() || null,
@@ -705,6 +844,12 @@ export default function PlantDetailPage() {
     ? Math.floor((Date.now() - new Date(latestAnalysis.created_at).getTime()) / 86_400_000)
     : null
   const analysisStale = daysSinceAnalysis !== null && daysSinceAnalysis > 14
+
+  // Structured actions belonging to the latest analysis (Phase 1.5) —
+  // rendered inline in the AI diagnosis card, read-only once resolved.
+  const latestAnalysisRecs = latestAnalysis
+    ? recommendations.filter(r => r.source_id === latestAnalysis.id)
+    : []
 
   // Health scores from all analyses, most recent last (for sparkline).
   const healthScores = allAnalyses
@@ -1091,6 +1236,27 @@ export default function PlantDetailPage() {
               </div>
             )}
 
+            {/* Structured next steps from this analysis (Phase 1.5) */}
+            {latestAnalysisRecs.length > 0 && (
+              <div className="px-4 py-2 border-b border-rule">
+                <div className="text-[11px] text-ink-soft font-semibold uppercase tracking-[0.1em] mt-1">
+                  Next steps
+                </div>
+                <div className="divide-y divide-dashed divide-rule">
+                  {latestAnalysisRecs.map(rec => (
+                    <AssistantActionRow
+                      key={rec.id}
+                      rec={rec}
+                      busy={recBusyId === rec.id}
+                      onAccept={() => handleRecAccept(rec)}
+                      onDone={() => handleRecDone(rec)}
+                      onDismiss={() => setDismissTarget(rec)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
             {analysisStale && (
               <div className="px-4 py-2.5 border-b border-rule flex items-center gap-2">
                 <Icon name="clock" size={12} stroke={2} className="text-warn shrink-0" />
@@ -1355,12 +1521,45 @@ export default function PlantDetailPage() {
       {/* ── Dossier ───────────────────────────────────────────────────── */}
       <SectionLabel number="§ 03" title="Dossier" action="Edit" onAction={() => setEditing(true)} />
       <div className="mx-5 px-4 bg-card border border-rule rounded-brand-lg">
-        {knownSpecies && <DossierRow
-          label="Species"
-          value={speciesProfile?.common_names
+        {knownSpecies && (() => {
+          // Phase 5 identity slice: verified means the owner asserted this
+          // name (Confirm chip, manual edit, or Add Plant confirmation). An
+          // AI-only ID (plant.species null) is unverified by definition.
+          const speciesVerified = !!plant.is_name_verified && !!plant.species
+          const speciesValue = speciesProfile?.common_names
             ? `${knownSpecies} (${speciesProfile.common_names.split(',')[0].trim()})`
-            : knownSpecies}
-        />}
+            : knownSpecies
+          return (
+            <div className="flex gap-4 py-2.5 border-b border-dashed border-rule">
+              <div className="w-20 shrink-0 font-mono text-[10px] tracking-[0.1em] uppercase text-ink-muted pt-0.5">
+                Species
+              </div>
+              <div className="flex-1 font-sans text-[13px] text-ink leading-relaxed">
+                {speciesValue}
+                <div className="mt-1.5 flex items-center gap-2">
+                  {speciesVerified ? (
+                    <span className="font-mono text-[9px] tracking-[0.14em] uppercase px-1.5 py-0.5 rounded bg-accent-soft text-accent">
+                      Verified
+                    </span>
+                  ) : (
+                    <>
+                      <button
+                        onClick={handleConfirmSpecies}
+                        disabled={verifyingSpecies}
+                        className="px-2.5 py-1 rounded-full border border-rule text-[11px] font-medium text-accent disabled:opacity-50"
+                      >
+                        {verifyingSpecies ? 'Confirming…' : 'Confirm'}
+                      </button>
+                      <span className="font-mono text-[9px] tracking-[0.1em] uppercase text-ink-muted">
+                        {speciesFromAI ? 'AI-identified' : 'Unconfirmed'}
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+          )
+        })()}
         {plant.location && <DossierRow label="Location" value={plant.location} />}
         {plant.pot_size && <DossierRow label="Pot" value={plant.pot_size} />}
         {plant.soil_type && <DossierRow label="Soil" value={plant.soil_type} />}
@@ -1899,6 +2098,24 @@ export default function PlantDetailPage() {
           </div>
         )
       })()}
+
+      {/* ── Assistant sheets (Phase 1) ───────────────────────────────── */}
+      {dismissTarget && (
+        <DismissSheet
+          busy={recBusyId === dismissTarget.id}
+          onClose={() => setDismissTarget(null)}
+          onSelect={reason => handleRecDismiss(dismissTarget, reason)}
+        />
+      )}
+      {intervalTarget && (
+        <IntervalConfirmSheet
+          rec={intervalTarget}
+          plantName={plant.nickname}
+          busy={recBusyId === intervalTarget.id}
+          onClose={() => setIntervalTarget(null)}
+          onConfirm={() => handleIntervalConfirm(intervalTarget)}
+        />
+      )}
 
       {/* ── Toast ─────────────────────────────────────────────────────── */}
       {toast && (

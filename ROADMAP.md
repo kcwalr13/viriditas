@@ -8,7 +8,7 @@ This file is the single source of truth for **where the app stands, what's open,
 
 ---
 
-## Current State (v1.5.2 — June 2026)
+## Current State (v1.6.0 — June 2026)
 
 **Live URL:** https://viriditas-three.vercel.app/
 **Repo:** https://github.com/kcwalr13/viriditas (auto-deploys `main` → Vercel)
@@ -18,7 +18,9 @@ name), track care logs and growth measurements, get context-aware AI health anal
 1–5 health scores, browse an AI-generated species encyclopedia, run a guided diagnostic
 flow, build time-lapses from photo history, track propagations, and work from a Today
 dashboard with urgent tasks, streaks, and bulk care actions. The Editorial Botanical design
-system is applied across every screen.
+system is applied across every screen. As of v1.6.0 the AI assistant emits structured,
+reviewable next steps that flow into the Today task list (Phase 1 of
+[docs/ASSISTANT-SPEC.md](docs/ASSISTANT-SPEC.md)), and species identity can be verified.
 
 ### What's built, by area
 
@@ -50,14 +52,22 @@ system is applied across every screen.
   deep links to/from Plant Detail.
 - **Me (`/settings`)** — identity, stats (plants / logs / analyses / streak), personality
   insights, JSON data export, sign out, app version.
-- **AI / Edge Functions** — `analyze-plant`, `fetch-species-info`, `identify-species`,
-  `suggest-species`. All four require a valid Supabase session (`getUser()`), hardened
-  v1.5.0 (SSRF imageUrl allowlist, explicit-field upserts, MIME allowlist). Claude Haiku
+- **AI / Edge Functions** — `analyze-plant` (v2: structured actions + interval suggestions
+  + identity context, v1.6.0), `fetch-species-info`, `identify-species`, `suggest-species`.
+  All four require a valid Supabase session (`getUser()`), hardened v1.5.0 (SSRF imageUrl
+  allowlist, explicit-field upserts, MIME allowlist). Claude Haiku
   (`claude-haiku-4-5-20251001`); Gemini swappable on the first two via `AI_PROVIDER`.
   Reference: [docs/EDGE-FUNCTIONS.md](docs/EDGE-FUNCTIONS.md).
+- **AI care assistant (Phase 1, v1.6.0)** — analyses emit 0–3 structured actions + optional
+  schedule suggestions → `care_recommendations` proposals → Today's "Assistant" section
+  with Accept / Done (auto-logs unambiguous care types) / Dismiss-with-reason; accepted
+  tasks join the task list; interval changes apply only via a confirm sheet; 14-day expiry.
+  Species identity verification (Confirm chip / VERIFIED tag / verified Add Plant saves)
+  feeds an identity-hedging line back into analysis prompts.
 - **Data layer** — `plants`, `photos`, `care_logs`, `analysis_results`, `species_profiles`,
-  `diagnoses`, `propagations` (last two applied in production 2026-06-09). Schema
-  reference: [docs/DATABASE.md](docs/DATABASE.md).
+  `diagnoses`, `propagations` (applied in production 2026-06-09), `care_recommendations`
+  (v1.6.0 — **migration pending production**). Schema reference:
+  [docs/DATABASE.md](docs/DATABASE.md).
 
 ---
 
@@ -69,7 +79,8 @@ system is applied across every screen.
 |---|---|---|
 | Test account credential in git history | ✅ | The old `ROADMAP_CURRENT.md` contained the `uitester` test-account credential in plaintext; it remains in git history even though the file is deleted. **Closed as accepted risk (Kyle, 2026-06-10):** it's a placeholder test account, the repo is private, and exposure doesn't matter. Do not re-flag in future reviews. Revisit only if the repo gains collaborators or goes public; keep future credentials out of the repo regardless. |
 | Re-enable Supabase email confirmation | ⬜ | Disabled for development convenience; required before sharing with real users. |
-| Verify / apply `is_name_verified` migration | ⬜ | `lib/types.ts` declares the optional column and the migration SQL exists (see [docs/DATABASE.md](docs/DATABASE.md)), but whether it was applied in production is unverified, and no app code uses it yet. |
+| Apply the `care_recommendations` migration in production | ⬜ | **Required for the v1.6.0 assistant features.** Run the DDL block from [docs/DATABASE.md](docs/DATABASE.md) in the Supabase SQL editor; until then the new UI degrades to empty (no crashes). Then redeploy `analyze-plant`. |
+| Verify / apply `is_name_verified` migration | ✅ | Column confirmed live in production 2026-06-10 (boolean, default false); v1.6.0 shipped the code that reads/writes it (dossier Confirm chip, manual edits, Add Plant, analysis identity context). |
 | Tag releases in git | ⬜ | Versions exist in `package.json`/CHANGELOG but there are no git tags. Optional, cheap, useful. |
 
 ### Near-term feature candidates
@@ -121,6 +132,12 @@ Full detail: [CHANGELOG.md](CHANGELOG.md) per version, git log per commit.
   password-reset routes; Today hydration fixes (no `new Date()` in SSR'd render bodies);
   `diagnoses`/`propagations` migrations applied in production; quick-log consistency on
   Plants list; custom 404.
+- **2026-06-10 — AI care assistant Session A (v1.6.0).** Phase 1 of
+  [docs/ASSISTANT-SPEC.md](docs/ASSISTANT-SPEC.md): structured actions from `analyze-plant`
+  v2 flow into the new `care_recommendations` table and the Today task loop
+  (Accept/Done/Dismiss, interval confirm sheet, 14-day expiry), plus the Phase 5 species
+  identity verification slice. Remaining sessions: B = interactive diagnosis (Phase 2),
+  C = adaptive schedules + rest of accuracy program (Phases 3+5), D = web push (Phase 4).
 
 ### Key decisions log
 

@@ -2,7 +2,7 @@
 
 **Purpose:** request/response contract, auth model, error behavior, and deploy commands for
 the four Supabase Edge Functions that power the AI features. Source of truth is the code in
-`supabase/functions/*/index.ts`; this file mirrors it as of v1.5.2.
+`supabase/functions/*/index.ts`; this file mirrors it as of v1.6.0.
 
 ## Common behavior (all four functions)
 
@@ -76,19 +76,38 @@ Called from Plant Detail (`handleAnalyze`).
   "speciesProfile": { /* species_profiles row fields; optional */ },
   "plantContext": {       // optional
     "location": "...", "pot_size": "...", "soil_type": "...",
-    "plant_notes": "...", "pest_notes": "...", "last_treatment_date": "YYYY-MM-DD"
+    "plant_notes": "...", "pest_notes": "...", "last_treatment_date": "YYYY-MM-DD",
+    "watering_interval_days": 7, "fertilizing_interval_days": null   // v1.6.0 — baseline for interval_suggestion
   },
-  "seasonContext": { "month": 6, "hemisphere": "northern" } // optional
+  "seasonContext": { "month": 6, "hemisphere": "northern" }, // optional
+  "identityContext": { "verified": false }  // optional, v1.6.0 — owner-confirmed species name or AI-assumed
 }
 ```
 
-**Response 200**
+**Response 200** *(v2 as of v1.6.0 — additive, backward compatible)*
 
-```json
-{ "result": { "species": "...", "health": "...", "health_score": 4, "care": "..." } }
+```jsonc
+{
+  "result": {
+    "species": "...", "health": "...", "health_score": 4, "care": "...",
+    "actions": [            // 0–3 structured next steps; [] for a healthy plant
+      { "action": "Move out of direct afternoon sun",   // imperative, plant-specific
+        "rationale": "...",
+        "urgency": "soon",                              // "now" | "soon" | "routine"
+        "due_in_days": 2 }                              // integer or null
+    ],
+    "interval_suggestion": {  // or null — proposed schedule change, never auto-applied
+      "type": "watering", "current_days": 7, "suggested_days": 10, "reason": "..."
+    }
+  }
+}
 ```
 
-`health_score` is clamped server-side to an integer 1–5.
+`health_score` is clamped server-side to an integer 1–5. The v2 fields are sanitized
+server-side before returning: at most 3 actions, malformed entries dropped, urgency
+coerced into the whitelist, `due_in_days` clamped to 0–60, `suggested_days` to 1–365.
+When `identityContext.verified` is false the prompt instructs the model to hedge
+species-specific claims and flag photo/species mismatches.
 
 **Errors:** 401 unauthorized · 400 `imageUrl is required` · 400 `imageUrl must point to the
 plant-photos storage bucket` · 500 provider/parse errors.
@@ -99,7 +118,8 @@ plant-photos storage bucket` · 500 provider/parse errors.
 - The image is fetched server-side and its media type detected from **magic bytes** (WebP,
   PNG, GIF, JPEG) — the storage `Content-Type` header is not trusted.
 - The function does **not** write to the database; the client saves the returned result to
-  `analysis_results`.
+  `analysis_results`, then inserts one `care_recommendations` row per action (plus one for
+  the interval suggestion) with `source='analysis'` and `source_id` = the new analysis id.
 - When adding a context field, update three places: the call-site payload in
   `app/(app)/plant/[id]/page.tsx`, the type in `analyze-plant/index.ts`, and the
   prompt-builder section that consumes it.

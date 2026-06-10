@@ -72,14 +72,16 @@ viriditas/
     Icon.tsx                # <Icon name="drop"/> — 38 single-stroke SVGs; replaces all emoji
     PlantPhoto.tsx          # Warm blocky gradient placeholder when no cover photo (deterministic from name)
     ui.tsx                  # StatusPip, Chip, BigTitle, SectionLabel, HairlineButton
+    AssistantActionRow.tsx  # Recommendation row + DismissSheet + IntervalConfirmSheet (assistant Phase 1)
     BottomNav.tsx           # Floating pill nav: Today / Plants / Explore / Me + camera FAB (routes to /camera)
     NavGuard.tsx            # Wraps BottomNav — hides it on /plant/*, /add-plant, and /camera
   lib/
     supabase/
       client.ts             # Browser Supabase client
       server.ts             # Server Supabase client (reads cookies)
-    types.ts                # Plant, PlantPhoto, CareLog, AnalysisResult, SpeciesProfile
+    types.ts                # Plant, PlantPhoto, CareLog, AnalysisResult, SpeciesProfile, CareRecommendation
     utils.ts                # formatDate, relativeTime, fileToBase64, computeWateringStatus, computeFertilizingStatus, computeStreak, computeMaxStreak, CARE_LOG_LABELS, URGENCY_ORDER
+    recommendations.ts      # care_recommendations mutations: accept/done/dismiss/apply-interval/expire + action→care-log map
     notifications.ts        # Stub — web push not supported; no-op exports
   supabase/
     functions/
@@ -137,6 +139,8 @@ viriditas/
 - [x] `app/(app)/plant/[id]/diagnose/page.tsx` — Branching diagnostic flow (11 verdicts, 3 question levels max); saves to `diagnoses` table (graceful-fail if migration not run); checklist with tap-to-complete next steps
 - [x] `app/(app)/plant/[id]/lineage/page.tsx` — Propagation graph; full CRUD for `propagations` table (graceful-fail if migration not run); log a cutting form with recipient, date, status, note
 - [x] Plant Detail `§ 08 · Tools` strip — three ToolTile cards linking to Time-lapse, Diagnose, and Lineage sub-screens
+- [x] **AI care assistant Phase 1 (v1.6.0)** — `analyze-plant` v2 emits 0–3 structured `actions` + optional `interval_suggestion`; client persists them to `care_recommendations` (graceful-fail if migration not run); Today gains an "Assistant — proposed" section with Accept/Done/Dismiss (+ dismiss-reason sheet), accepted tasks join the task list, interval changes apply only via a confirm sheet; Plant Detail renders the same rows in the AI diagnosis card; proposals expire after 14 days
+- [x] **Species identity verification (v1.6.0, Phase 5 P0 slice)** — dossier Confirm chip / VERIFIED tag, manual species edits set `is_name_verified`, Add Plant saves confirmed/typed species as verified, `analyze-plant` gets an identity-verified context line
 
 ## What Comes Next
 See `ROADMAP.md` for the current state, known gaps, priorities, and development history.
@@ -237,6 +241,7 @@ Floating pill with four tabs: **Today / Plants / Explore / Me**, plus an accent-
 - acquired_date (nullable, YYYY-MM-DD), last_repotted_date (nullable, YYYY-MM-DD)
 - notes (nullable), watering_interval_days (nullable int), fertilizing_interval_days (nullable int)
 - soil_type (nullable), tags (text[] default '{}'), pest_notes (nullable), last_treatment_date (nullable, YYYY-MM-DD)
+- is_name_verified (boolean, default false) — see the identity note below
 - created_at
 
 `photos`
@@ -270,14 +275,22 @@ Floating pill with four tabs: **Today / Plants / Explore / Me**, plus an accent-
 - id, user_id, parent_plant_id, child_plant_id (nullable), recipient_name (nullable)
 - taken_on (date), status (CHECK: rooting/thriving/failed/unknown, default rooting), note (nullable)
 
+`care_recommendations` *(v1.6.0 — assistant Phase 1; full SQL in `docs/DATABASE.md`; **migration pending production**)*
+- id, plant_id, user_id, created_at, resolved_at (nullable)
+- source (CHECK: analysis/diagnosis/seasonal), source_id (uuid, nullable — the analysis row)
+- action (imperative text), rationale (nullable), urgency (CHECK: now/soon/routine), due_date (nullable date)
+- interval_suggestion (jsonb, nullable — `{type, current_days, suggested_days, reason}`; applied only via the confirm sheet)
+- status (CHECK: proposed/accepted/done/dismissed/expired), dismissed_reason (nullable CHECK: wrong/already_done/later)
+- All app queries against this table soft-fail to empty on a database without the migration
+
 > **Full schema reference** — column types, constraints, RLS policies, indexes, and the
 > consolidated migration SQL live in `docs/DATABASE.md`. Keep both in sync when the schema changes.
 
-> **`is_name_verified` (confirmed live, unused):** `lib/types.ts` declares an optional
-> `is_name_verified?: boolean` on `Plant`. The column **exists in production** (verified
-> against the live database 2026-06-10: boolean, default false). No app code reads or
-> writes it yet — the planned consumer is the identity-verification slice in
-> `docs/ASSISTANT-SPEC.md` (Phase 5).
+> **`is_name_verified` (in use since v1.6.0):** boolean on `plants`, default false,
+> confirmed live in production 2026-06-10. Set true when the owner asserts the species
+> name (dossier Confirm chip, manual species edit, Add Plant confirm/typed name); cleared
+> when the species is removed. `analyze-plant` receives it as `identityContext` so the
+> model hedges species-specific claims while the name is AI-assumed.
 
 **care_logs type constraint** — allowed values: `watered`, `fertilized`, `note`, `repotted`, `pruned`, `misted`, `pest_treatment`, `moved`, `measured`. To add new types:
 ```sql
@@ -348,10 +361,13 @@ ALTER TABLE care_logs ADD CONSTRAINT care_logs_type_check CHECK (type IN (...all
 ### Analyze-Plant Context (Phase 15 — Gaps 1, 2, 3, 5)
 The `analyze-plant` Edge Function receives rich context so the AI can deliver plant-specific advice instead of generic species guidance:
 - **Species profile**: full row including `pruning_tips`, `disease_symptoms`, `seasonal_care` (not just light/water/temp). Disease symptoms are especially valuable — they let the AI cross-reference what it sees in the photo against known issue signatures for that species.
-- **Plant context**: `location`, `pot_size`, `soil_type`, plus `plant_notes` (owner's freeform notes), `pest_notes` (pest history), `last_treatment_date`. Pest history is consequential — recurring infestations get treated very differently from first occurrences.
+- **Plant context**: `location`, `pot_size`, `soil_type`, plus `plant_notes` (owner's freeform notes), `pest_notes` (pest history), `last_treatment_date`, and (v1.6.0) `watering_interval_days`/`fertilizing_interval_days` — the current schedules are the baseline any `interval_suggestion` is judged against. The client now always sends `plantContext`. Pest history is consequential — recurring infestations get treated very differently from first occurrences.
 - **Previous analyses**: includes `health_score` (1–5 trend) and `care` (prior recommendations). The AI is instructed to comment on whether scores are improving/declining and whether the owner appears to have followed previous recommendations.
 - **Recent care logs**: each entry can include `category` (for `note` rows) and `measurement_value`/`measurement_unit` (for `measured` rows). The AI uses categorized notes to understand what the owner was focused on, and measurements to assess growth rate.
 - **Season context**: month + hemisphere (currently hardcoded to `northern`).
+- **Identity context** (v1.6.0, Phase 5 slice): `identityContext: { verified: boolean } | null` — whether the owner has confirmed the species name. Unverified → the prompt tells the model to hedge species-specific claims and flag photo/species mismatches.
+
+The v2 response adds `actions` (0–3 structured next steps) and `interval_suggestion`, both sanitized in the function before returning — see `docs/EDGE-FUNCTIONS.md` for the exact shapes. The client persists them to `care_recommendations` after saving the analysis.
 
 When adding a new field to one of these context types, update three places: the call-site payload in [`plant/[id]/page.tsx`](app/(app)/plant/[id]/page.tsx) `handleAnalyze`, the type definition in `analyze-plant/index.ts`, and the prompt-builder section that consumes it.
 
@@ -481,3 +497,4 @@ When a version bumps, also add a matching entry to `CHANGELOG.md` (the human-fac
 - `1.5.0` — Review remediation: fixed the lint error that was failing every Vercel build since 1.4.0 (production was stuck on 1.3.0 — the cause of the "missing" Tools strip and /camera 404); Edge Function auth + SSRF/cache-poisoning hardening; Today hydration fix; password-reset routes whitelisted in middleware; toxicity label fix; streak badge, schedule chips, stat colors, Add Plant validation, Invalid Date fixes; custom 404 page
 - `1.5.1` — Fixed the remaining Today hydration error (#418): masthead date/season, greeting, streak-since text, activity grid, and journal-peek relative time were all computed from `new Date()` in the render body, so Vercel's UTC server render diverged from the browser's local-time render after 8 PM Eastern. `TodayClient` now keeps a `now: Date | null` state set in a mount effect; time-derived strings render deterministic fallbacks until it's set. Pattern note: never call `new Date()` (or read the clock any other way) in the render body of a client component that gets server-rendered.
 - `1.5.2` — Plants list view: quick-log buttons now render on every row (the last Info item from the June 2026 review). Water is always loggable; feed shows whenever a fertilizing schedule exists; urgency is expressed by button color (solid danger/warn when due, quiet outline otherwise) instead of by the button appearing and disappearing.
+- `1.6.0` — AI care assistant Session A (`docs/ASSISTANT-SPEC.md` Phase 1 + Phase 5 identity slice): `care_recommendations` table + `analyze-plant` v2 (structured actions, interval suggestions, identity context, current-schedule context); Today "Assistant — proposed" section with Accept/Done/Dismiss and dismiss-reason sheet; accepted tasks join the task list; interval confirm sheet; Plant Detail inline action rows; 14-day proposal expiry; species identity verification (dossier Confirm chip/VERIFIED tag, verified manual edits, Add Plant verified saves).

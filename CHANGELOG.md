@@ -4,6 +4,42 @@ All notable user-facing changes to Viriditas, newest first. The version number l
 `package.json` and is shown on the Me screen; versioning rules are in
 [CLAUDE.md → Versioning Convention](CLAUDE.md). Documentation-only changes don't bump the version.
 
+## 1.6.0 — 2026-06-10
+
+AI care assistant, Phase 1 (structured actions) + Phase 5 identity slice — Session A of
+[docs/ASSISTANT-SPEC.md](docs/ASSISTANT-SPEC.md).
+
+**The insight→task loop**
+- New `care_recommendations` table (migration must be run in production — see
+  docs/DATABASE.md): every AI analysis can now emit 0–3 structured next steps and an
+  optional schedule-change suggestion, stored as reviewable proposals.
+- `analyze-plant` v2 (redeploy required): additive response contract — `actions`
+  (imperative step + rationale + urgency + due-in-days, sanitized server-side) and
+  `interval_suggestion`. Existing fields and old analyses render unchanged. The prompt
+  is told to emit zero actions for a healthy plant rather than inventing work.
+- Today gains an **Assistant — proposed** section: each card shows the plant, the action,
+  an urgency chip, a collapsible "Why?" rationale, and Accept / Done / Dismiss controls
+  (Dismiss captures a reason: not right / already done / later).
+- Accepted recommendations join the main task list (sorted above interval tasks of equal
+  urgency, with due-date labels) and can be completed or dismissed inline. Completing an
+  action with an unambiguous care type (water/feed/mist/prune/pest/move) auto-writes the
+  matching care log, noted "via assistant".
+- Accepting a schedule suggestion opens a confirm sheet ("Watering: every 7d → every 10d"
+  + the AI's reason); nothing changes until Confirm is tapped.
+- Plant Detail renders the same action rows inline in the AI diagnosis card (read-only
+  status once resolved).
+- Proposals not acted on within 14 days expire automatically on Today load.
+
+**Species identity verification (Phase 5 P0 slice)**
+- Plant Detail dossier: unverified species rows show a quiet Confirm chip (plus an
+  "AI-identified" tag when the name came from analysis); confirming copies the name onto
+  the plant and marks it verified. Verified rows show a small mono VERIFIED tag.
+- Manual species edits set the verified flag; clearing the species clears it.
+- Add Plant: the AI match now says "AI-identified — tap Confirm, or correct it by name
+  below", and any species saved from the wizard (confirmed or typed) starts verified.
+- `analyze-plant` receives an identity line so the model hedges species-specific claims
+  when the name is AI-assumed, and flags photo/species mismatches.
+
 ## 1.5.2 — 2026-06-10
 
 - Plants list view: the same quick-log button cluster now renders on **every** row — water is

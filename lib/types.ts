@@ -17,9 +17,10 @@ export type Plant = {
   tags: string[]                    // freeform tag strings, e.g. ["rare", "propagation"]
   pest_notes: string | null         // free-text notes on pest history
   last_treatment_date: string | null // date of most recent pest treatment
-  // is_name_verified is true when the user has manually confirmed/corrected the
-  // species name; false (or absent) when it came from AI identification only.
-  // Migration required before this persists: see docs/DATABASE.md (status unverified)
+  // is_name_verified is true when the user has confirmed/corrected the species
+  // name (Confirm chip in the dossier, manual species edit, or Add Plant
+  // confirmation); false when it came from AI identification only. Column is
+  // live in production (verified 2026-06-10). Phase 5 identity slice.
   is_name_verified?: boolean
   created_at: string
 }
@@ -66,6 +67,51 @@ export type AnalysisResult = {
   health_score: number | null  // 1–5 integer (Phase 12A); null for analyses before this was added
   care: string | null
   created_at: string
+}
+
+// ── Care recommendations (Phase 1 — the insight→task loop) ─────────────────
+// One row per structured action the assistant proposes. Created by the client
+// after an AI analysis (source 'analysis'); later phases add 'diagnosis' and
+// 'seasonal' sources. The user resolves each row from Today or Plant Detail.
+
+export type RecommendationSource = 'analysis' | 'diagnosis' | 'seasonal'
+export type RecommendationUrgency = 'now' | 'soon' | 'routine'
+export type RecommendationStatus = 'proposed' | 'accepted' | 'done' | 'dismissed' | 'expired'
+export type DismissedReason = 'wrong' | 'already_done' | 'later'
+
+// A proposed schedule change, stored as jsonb on the recommendation row.
+// Nothing is applied until the user confirms it in the interval sheet.
+export type IntervalSuggestion = {
+  type: 'watering' | 'fertilizing'
+  current_days: number | null    // null when the plant had no schedule
+  suggested_days: number
+  reason: string
+}
+
+export type CareRecommendation = {
+  id: string
+  plant_id: string
+  user_id: string
+  source: RecommendationSource
+  source_id: string | null               // the analysis_results / diagnoses row it came from
+  action: string                         // imperative, e.g. "Move out of direct afternoon sun"
+  rationale: string | null               // why the assistant suggests it
+  urgency: RecommendationUrgency
+  due_date: string | null                // YYYY-MM-DD
+  interval_suggestion: IntervalSuggestion | null
+  status: RecommendationStatus
+  dismissed_reason: DismissedReason | null
+  created_at: string
+  resolved_at: string | null
+}
+
+// Shape of one entry in the analyze-plant v2 `actions` array (already
+// sanitized server-side: ≤3 entries, whitelisted urgency).
+export type AnalysisAction = {
+  action: string
+  rationale: string
+  urgency: RecommendationUrgency
+  due_in_days: number | null
 }
 
 // Encyclopedic species reference data — fetched once per species via the

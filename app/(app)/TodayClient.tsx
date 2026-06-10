@@ -9,10 +9,15 @@ import { useRouter } from 'next/navigation'
 import { BigTitle, SectionLabel, StatusPip, HairlineButton } from '@/components/ui'
 import { Icon } from '@/components/Icon'
 import { PlantPhoto } from '@/components/PlantPhoto'
+import { AssistantActionRow, DismissSheet, IntervalConfirmSheet, daysUntil, dueLabel } from '@/components/AssistantActionRow'
 import { relativeTime } from '@/lib/utils'
+import {
+  acceptRecommendation, completeRecommendation, dismissRecommendation,
+  applyIntervalSuggestion, expireStaleRecommendations,
+} from '@/lib/recommendations'
 import { createClient } from '@/lib/supabase/client'
-import type { NoteCategory } from '@/lib/types'
-import type { PlantCard, JournalPeek } from './page'
+import type { NoteCategory, DismissedReason } from '@/lib/types'
+import type { PlantCard, JournalPeek, RecommendationCard } from './page'
 
 const NOTE_CATEGORIES: Array<{ key: NoteCategory; label: string }> = [
   { key: 'growth',      label: 'Growth'      },
@@ -29,9 +34,11 @@ interface Props {
   tendedToday: number
   activityDays: string[]   // YYYY-MM-DD strings with at least one care log
   weeklyLogs: number
+  recommendations: RecommendationCard[]   // open (proposed + accepted) assistant recommendations
+  userId: string
 }
 
-export default function TodayClient({ cards, streak, journalPeek, tendedToday, activityDays, weeklyLogs }: Props) {
+export default function TodayClient({ cards, streak, journalPeek, tendedToday, activityDays, weeklyLogs, recommendations, userId }: Props) {
   // The server renders this component in UTC (Vercel), then the browser
   // hydrates it in the user's local timezone. Any value derived from
   // `new Date()` during render can therefore differ between the two and
@@ -65,6 +72,25 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
   const [addingNote,   setAddingNote]   = useState(false)
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Assistant recommendation state (Phase 1)
+  const [recBusyId,      setRecBusyId]      = useState<string | null>(null)
+  const [dismissTarget,  setDismissTarget]  = useState<RecommendationCard | null>(null)
+  const [intervalTarget, setIntervalTarget] = useState<RecommendationCard | null>(null)
+  // Rows resolved this session. The server props stay stale until
+  // router.refresh() lands, so without this a just-completed row would
+  // re-render actionable for a moment — and a second "Done" tap would
+  // write a duplicate care log.
+  const [resolvedRecIds, setResolvedRecIds] = useState<Set<string>>(new Set())
+
+  // Phase 1.6 expiry: on Today load, retire proposals older than 14 days.
+  // Runs once per mount; only refreshes when something actually expired.
+  useEffect(() => {
+    expireStaleRecommendations(createClient(), userId).then(count => {
+      if (count > 0) router.refresh()
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId])
+
   const showToast = useCallback((message: string) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current)
     setToast({ message, key: Date.now() })
@@ -91,6 +117,83 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
     (c.wateringStatus === 'due-soon' || c.fertilizingStatus === 'due-soon')
   ), [cards])
 
+  // ── Assistant recommendations (Phase 1) ────────────────────────────────
+  const proposals = useMemo(
+    () => recommendations.filter(r => r.rec.status === 'proposed' && !resolvedRecIds.has(r.rec.id)),
+    [recommendations, resolvedRecIds])
+  const acceptedTasks = useMemo(
+    () => recommendations.filter(r => r.rec.status === 'accepted' && !resolvedRecIds.has(r.rec.id)),
+    [recommendations, resolvedRecIds])
+
+  // Accepted tasks join the main task list (spec 1.4): past-due or "now"
+  // urgency joins Needs attention; the rest join Due soon. Sorted by due
+  // date then urgency, and rendered above interval tasks in each section.
+  // Date comparisons wait for the mounted clock (`now`) — pre-mount we
+  // bucket by urgency alone so SSR and hydration render identically.
+  const URGENCY_RANK: Record<string, number> = { now: 0, soon: 1, routine: 2 }
+  const sortAccepted = (a: RecommendationCard, b: RecommendationCard) => {
+    if (a.rec.due_date && b.rec.due_date && a.rec.due_date !== b.rec.due_date) {
+      return a.rec.due_date < b.rec.due_date ? -1 : 1
+    }
+    if (!!a.rec.due_date !== !!b.rec.due_date) return a.rec.due_date ? -1 : 1
+    return (URGENCY_RANK[a.rec.urgency] ?? 2) - (URGENCY_RANK[b.rec.urgency] ?? 2)
+  }
+  const acceptedUrgent = useMemo(() =>
+    acceptedTasks
+      .filter(r => r.rec.urgency === 'now' || (now !== null && r.rec.due_date !== null && daysUntil(r.rec.due_date, now) < 0))
+      .sort(sortAccepted),
+    [acceptedTasks, now]) // eslint-disable-line react-hooks/exhaustive-deps
+  const acceptedSoon = useMemo(() =>
+    acceptedTasks.filter(r => !acceptedUrgent.includes(r)).sort(sortAccepted),
+    [acceptedTasks, acceptedUrgent]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Marks a row locally resolved so it disappears right away instead of
+  // waiting for the server refresh (see resolvedRecIds note above).
+  function markRecResolved(id: string) {
+    setResolvedRecIds(prev => new Set(prev).add(id))
+  }
+
+  async function recAccept(card: RecommendationCard) {
+    if (recBusyId) return
+    // Interval suggestions go through the confirm sheet — never applied directly.
+    if (card.rec.interval_suggestion) { setIntervalTarget(card); return }
+    setRecBusyId(card.rec.id)
+    const ok = await acceptRecommendation(createClient(), card.rec)
+    if (ok) { showToast(`Added to tasks · ${card.plantNickname}`); router.refresh() }
+    setRecBusyId(null)
+  }
+
+  async function recDone(card: RecommendationCard) {
+    if (recBusyId) return
+    setRecBusyId(card.rec.id)
+    const ok = await completeRecommendation(createClient(), card.rec)
+    if (ok) { markRecResolved(card.rec.id); showToast(`Done · ${card.plantNickname}`); router.refresh() }
+    setRecBusyId(null)
+  }
+
+  async function recDismiss(card: RecommendationCard, reason: DismissedReason) {
+    if (recBusyId) return
+    setRecBusyId(card.rec.id)
+    const ok = await dismissRecommendation(createClient(), card.rec, reason)
+    if (ok) { markRecResolved(card.rec.id); showToast('Dismissed'); router.refresh() }
+    setRecBusyId(null)
+    setDismissTarget(null)
+  }
+
+  async function recIntervalConfirm(card: RecommendationCard) {
+    if (recBusyId) return
+    setRecBusyId(card.rec.id)
+    const ok = await applyIntervalSuggestion(createClient(), card.rec)
+    if (ok) {
+      const s = card.rec.interval_suggestion!
+      markRecResolved(card.rec.id)
+      showToast(`${s.type === 'watering' ? 'Watering' : 'Fertilizing'} · every ${s.suggested_days}d · ${card.plantNickname}`)
+      router.refresh()
+    }
+    setRecBusyId(null)
+    setIntervalTarget(null)
+  }
+
   // Plants with care due in 2–7 days — not yet in the task list.
   const upcoming = useMemo(() => {
     const result: Array<{ card: PlantCard; label: string; icon: 'drop' | 'leaf'; days: number }> = []
@@ -111,6 +214,10 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
   }, [cards])
 
   const totalTodo = overdue.length + dueSoon.length
+  // Everything actionable today: interval tasks + accepted assistant tasks.
+  // The masthead and "all caught up" states count this, matching the section
+  // headers below (which also include assistant rows).
+  const totalOpen = totalTodo + acceptedTasks.length
   // Persist overdue count to localStorage so BottomNav can show a badge.
   // Must run in an effect — writing during render causes a hydration mismatch.
   useEffect(() => {
@@ -217,19 +324,23 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
         <BigTitle>
           {greeting(now)}.<br />
           <span className="italic text-accent">
-            {totalTodo === 0 && unscheduled.length === cards.length
+            {totalOpen === 0 && unscheduled.length === cards.length
               ? 'Set up a care schedule.'
-              : totalTodo === 0 && tendedToday > 0
+              : totalOpen === 0 && tendedToday > 0
               ? 'All done today.'
-              : totalTodo === 0
+              : totalOpen === 0
               ? 'All plants are settled.'
-              : tendedToday > 0 && totalTodo === 1
+              : tendedToday > 0 && totalOpen === 1
               ? `${tendedToday} done · 1 more to go.`
-              : tendedToday > 0 && totalTodo > 1
-              ? `${tendedToday} done · ${totalTodo} more to go.`
-              : totalTodo === 1
+              : tendedToday > 0 && totalOpen > 1
+              ? `${tendedToday} done · ${totalOpen} more to go.`
+              : totalTodo === 0
+              ? `${acceptedTasks.length} assistant task${acceptedTasks.length === 1 ? '' : 's'} open.`
+              : totalOpen === 1
               ? `${[...overdue, ...dueSoon][0]?.plant.nickname ?? 'a plant'} needs you.`
-              : `${totalTodo} plants need you.`}
+              : acceptedTasks.length > 0
+              ? `${totalOpen} tasks need you.`
+              : `${totalOpen} plants need you.`}
           </span>
         </BigTitle>
       </div>
@@ -277,7 +388,7 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
       </div>
 
       {/* ── Tended today (positive reinforcement) ────────────────────── */}
-      {tendedToday > 0 && totalTodo === 0 && (
+      {tendedToday > 0 && totalOpen === 0 && (
         <div className="mx-5 mt-3.5 flex items-center gap-2.5 px-3.5 py-2.5 bg-accent-soft border border-rule rounded-brand">
           <Icon name="check" size={15} stroke={2.2} className="text-accent shrink-0" />
           <span className="text-[13px] font-medium text-accent">
@@ -287,7 +398,7 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
           </span>
         </div>
       )}
-      {tendedToday > 0 && totalTodo > 0 && (
+      {tendedToday > 0 && totalOpen > 0 && (
         <div className="mx-5 mt-3.5 flex items-center gap-2.5 px-3.5 py-2.5 bg-card border border-rule rounded-brand">
           <Icon name="check" size={15} stroke={2.2} className="text-accent shrink-0" />
           <span className="text-[13px] text-ink-soft">
@@ -297,12 +408,12 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
       )}
 
       {/* ── Overdue ───────────────────────────────────────────────────── */}
-      {overdue.length > 0 && (() => {
+      {(overdue.length > 0 || acceptedUrgent.length > 0) && (() => {
         const waterTargets = overdue.filter(c => c.wateringStatus === 'overdue').length
         const feedTargets  = overdue.filter(c => c.fertilizingStatus === 'overdue').length
         return (
           <>
-            <SectionLabel number={nextSec()} title={`Needs attention — ${overdue.length}`} />
+            <SectionLabel number={nextSec()} title={`Needs attention — ${overdue.length + acceptedUrgent.length}`} />
             {(waterTargets > 1 || feedTargets > 1) && (
               <div className="px-5 flex gap-2 mb-1">
                 {waterTargets > 1 && (
@@ -328,6 +439,17 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
               </div>
             )}
             <div className="px-5 flex flex-col gap-2">
+              {/* Accepted assistant tasks sort above interval tasks (spec 1.4) */}
+              {acceptedUrgent.map(item => (
+                <AssistantTaskRow
+                  key={item.rec.id}
+                  item={item}
+                  now={now}
+                  busy={recBusyId === item.rec.id}
+                  onDone={() => recDone(item)}
+                  onDismiss={() => setDismissTarget(item)}
+                />
+              ))}
               {overdue.map(card => (
                 <TaskRow
                   key={card.plant.id}
@@ -343,10 +465,20 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
       })()}
 
       {/* ── Due soon ──────────────────────────────────────────────────── */}
-      {dueSoon.length > 0 && (
+      {(dueSoon.length > 0 || acceptedSoon.length > 0) && (
         <>
-          <SectionLabel number={nextSec()} title={`Due soon — ${dueSoon.length}`} />
+          <SectionLabel number={nextSec()} title={`Due soon — ${dueSoon.length + acceptedSoon.length}`} />
           <div className="px-5 flex flex-col gap-2">
+            {acceptedSoon.map(item => (
+              <AssistantTaskRow
+                key={item.rec.id}
+                item={item}
+                now={now}
+                busy={recBusyId === item.rec.id}
+                onDone={() => recDone(item)}
+                onDismiss={() => setDismissTarget(item)}
+              />
+            ))}
             {dueSoon.map(card => (
               <TaskRow
                 key={card.plant.id}
@@ -361,7 +493,7 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
       )}
 
       {/* ── All caught up / no-schedule note ─────────────────────────── */}
-      {totalTodo === 0 && unscheduled.length === cards.length && (
+      {totalOpen === 0 && unscheduled.length === cards.length && (
         <Link
           href="/plants"
           className="block mx-5 mt-4 p-4 bg-card border border-rule rounded-brand text-center"
@@ -374,7 +506,7 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
           </p>
         </Link>
       )}
-      {totalTodo === 0 && unscheduled.length < cards.length && (
+      {totalOpen === 0 && unscheduled.length < cards.length && (
         <div className="mx-5 mt-4 p-4 bg-card border border-rule rounded-brand text-center">
           <div className="inline-flex items-center gap-2 text-accent text-[11px] font-semibold uppercase tracking-[0.1em]">
             <Icon name="sparkle" size={12} stroke={1.9} /> All caught up
@@ -402,6 +534,28 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
           </span>
           <Icon name="chev" size={13} className="text-ink-muted" />
         </Link>
+      )}
+
+      {/* ── Assistant — proposed (Phase 1.4) ──────────────────────────── */}
+      {proposals.length > 0 && (
+        <>
+          <SectionLabel number={nextSec()} title={`Assistant — ${proposals.length} proposed`} />
+          <div className="px-5 flex flex-col gap-2">
+            {proposals.map(item => (
+              <div key={item.rec.id} className="bg-card border border-rule rounded-brand px-3.5">
+                <AssistantActionRow
+                  rec={item.rec}
+                  plantName={item.plantNickname}
+                  now={now}
+                  busy={recBusyId === item.rec.id}
+                  onAccept={() => recAccept(item)}
+                  onDone={() => recDone(item)}
+                  onDismiss={() => setDismissTarget(item)}
+                />
+              </div>
+            ))}
+          </div>
+        </>
       )}
 
       {/* ── Coming up (2–7 days) ──────────────────────────────────────── */}
@@ -615,6 +769,24 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
         </div>
       )}
 
+      {/* ── Assistant sheets (Phase 1) ───────────────────────────────── */}
+      {dismissTarget && (
+        <DismissSheet
+          busy={recBusyId === dismissTarget.rec.id}
+          onClose={() => setDismissTarget(null)}
+          onSelect={reason => recDismiss(dismissTarget, reason)}
+        />
+      )}
+      {intervalTarget && (
+        <IntervalConfirmSheet
+          rec={intervalTarget.rec}
+          plantName={intervalTarget.plantNickname}
+          busy={recBusyId === intervalTarget.rec.id}
+          onClose={() => setIntervalTarget(null)}
+          onConfirm={() => recIntervalConfirm(intervalTarget)}
+        />
+      )}
+
       {/* ── Toast ─────────────────────────────────────────────────────── */}
       {toast && (
         <div
@@ -626,6 +798,75 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
           {toast.message}
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── AssistantTaskRow: an accepted assistant task in the main task list ──
+// Mirrors TaskRow's layout (thumbnail · text · action button) so accepted
+// recommendations read as first-class tasks alongside interval tasks.
+function AssistantTaskRow({
+  item, now, busy, onDone, onDismiss,
+}: {
+  item: RecommendationCard
+  now: Date | null
+  busy: boolean
+  onDone: () => void
+  onDismiss: () => void
+}) {
+  const due = now ? dueLabel(item.rec, now) : null
+  const urgent = item.rec.urgency === 'now' || (due?.overdue ?? false)
+  return (
+    <div className="flex items-center gap-3 bg-card border border-rule rounded-brand pl-3 pr-2.5 py-2.5">
+      {/* Thumbnail — taps through to plant detail */}
+      <Link
+        href={`/plant/${item.rec.plant_id}`}
+        className="w-[52px] h-[52px] rounded-[10px] overflow-hidden border border-rule shrink-0 relative"
+      >
+        {item.coverPhotoUrl ? (
+          <Image src={item.coverPhotoUrl} alt={item.plantNickname} fill sizes="52px" className="object-cover" />
+        ) : (
+          <PlantPhoto name={item.rec.plant_id} showLabel={false} />
+        )}
+      </Link>
+
+      {/* Plant + action — taps through to plant detail */}
+      <Link href={`/plant/${item.rec.plant_id}`} className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <Icon name="sparkle" size={11} stroke={2} className="text-accent shrink-0" />
+          <span className="font-mono text-[9px] uppercase tracking-[0.12em] text-ink-muted truncate">
+            {item.plantNickname}
+          </span>
+          {due && (
+            <span className={`font-mono text-[9px] uppercase tracking-[0.08em] shrink-0 ${due.overdue ? 'text-danger' : 'text-ink-muted'}`}>
+              · {due.text}
+            </span>
+          )}
+        </div>
+        <div className="font-sans text-[13px] font-medium text-ink mt-0.5 leading-snug">
+          {item.rec.action}
+        </div>
+      </Link>
+
+      {/* Done / dismiss — resolve without navigating */}
+      <div className="flex items-center gap-0.5 shrink-0">
+        <button
+          onClick={onDone}
+          disabled={busy}
+          aria-label="Mark done"
+          className={`w-11 h-11 rounded-full flex items-center justify-center disabled:opacity-50 ${urgent ? 'bg-danger' : 'bg-accent'}`}
+        >
+          <Icon name="check" size={17} stroke={2.2} className="text-paper" />
+        </button>
+        <button
+          onClick={onDismiss}
+          disabled={busy}
+          aria-label="Dismiss task"
+          className="w-8 h-11 flex items-center justify-center text-ink-muted disabled:opacity-50"
+        >
+          <Icon name="close" size={14} stroke={1.8} />
+        </button>
+      </div>
     </div>
   )
 }

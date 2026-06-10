@@ -37,7 +37,7 @@ One row per registered plant, owned by a user.
 | `pest_notes` | text, nullable | pest history; passed to the AI |
 | `last_treatment_date` | date, nullable | most recent pest treatment |
 | `created_at` | timestamptz | |
-| `is_name_verified` | boolean, default `false` — **confirmed live in production (2026-06-10)** | declared optional in `lib/types.ts`; no app code reads or writes it yet (planned: docs/ASSISTANT-SPEC.md Phase 5) |
+| `is_name_verified` | boolean, default `false` — **confirmed live in production (2026-06-10)** | true when the owner asserted the species name (dossier Confirm chip, manual species edit, or Add Plant confirm/typed name — all v1.6.0). Read by `analyze-plant`'s identity context so the AI hedges unverified species claims. |
 
 ### `photos`
 
@@ -116,6 +116,47 @@ alter table diagnoses enable row level security;
 create policy "Users manage own diagnoses" on diagnoses
   for all using (auth.uid() = user_id);
 ```
+
+### `care_recommendations` *(v1.6.0 — Phase 1 of docs/ASSISTANT-SPEC.md; **migration pending production**)*
+
+Structured next steps proposed by the assistant. Created by the **client** after an AI
+analysis (one row per action, plus one carrying an `interval_suggestion` when present);
+resolved by the user from Today or Plant Detail. Later phases add `diagnosis` and
+`seasonal` sources. The app degrades gracefully when this table is missing (queries
+soft-fail to empty lists), but Phase 1 features need it. Full DDL:
+
+```sql
+create table if not exists care_recommendations (
+  id uuid primary key default gen_random_uuid(),
+  plant_id uuid not null references plants(id) on delete cascade,
+  user_id uuid not null references auth.users(id),
+  source text not null check (source in ('analysis','diagnosis','seasonal')),
+  source_id uuid,
+  action text not null,
+  rationale text,
+  urgency text not null check (urgency in ('now','soon','routine')) default 'routine',
+  due_date date,
+  interval_suggestion jsonb,
+  status text not null check (status in ('proposed','accepted','done','dismissed','expired')) default 'proposed',
+  dismissed_reason text check (dismissed_reason in ('wrong','already_done','later')),
+  created_at timestamptz not null default now(),
+  resolved_at timestamptz
+);
+create index if not exists idx_care_recs_user_status on care_recommendations(user_id, status);
+create index if not exists idx_care_recs_plant on care_recommendations(plant_id, created_at desc);
+alter table care_recommendations enable row level security;
+create policy "Users manage own care_recommendations" on care_recommendations
+  for all using (auth.uid() = user_id);
+```
+
+Column notes:
+- `source_id` — the `analysis_results` (later: `diagnoses`) row the recommendation came
+  from; intentionally no FK so analyses can be deleted without losing the task.
+- `interval_suggestion` — jsonb `{ type: 'watering'|'fertilizing', current_days, suggested_days, reason }`;
+  only applied to `plants.*_interval_days` after the user confirms in the interval sheet.
+- `status` lifecycle: `proposed` → `accepted` → `done`, or `proposed/accepted` →
+  `dismissed` (with `dismissed_reason`), or `proposed` → `expired` (client marks
+  proposals older than 14 days on Today load). `resolved_at` set on done/dismissed/expired.
 
 ### `propagations` *(applied in production 2026-06-09)*
 
@@ -210,11 +251,13 @@ CREATE INDEX IF NOT EXISTS idx_care_logs_plant_category
   ON care_logs (plant_id, category)
   WHERE category IS NOT NULL;
 
--- Written 2026-04-19; application status UNVERIFIED (see plants table notes)
+-- Written 2026-04-19; confirmed applied in production 2026-06-10
 ALTER TABLE plants ADD COLUMN IF NOT EXISTS is_name_verified boolean DEFAULT false;
 ```
 
-Plus the `diagnoses` and `propagations` blocks above (applied 2026-06-09).
+Plus the `diagnoses` and `propagations` blocks above (applied 2026-06-09), and the
+`care_recommendations` block above (**v1.6.0 — NOT yet applied in production**; run it in
+the Supabase SQL editor before using the assistant features).
 
 > Phase 15 note: the journaling columns are nullable with no backfill **on purpose** —
 > backfilling `'general'` onto old notes would mislead the AI into treating uncategorized
@@ -325,5 +368,5 @@ create policy "Authenticated users read species profiles" on species_profiles
   for select using (auth.role() = 'authenticated');
 ```
 
-Then run the `diagnoses` and `propagations` blocks from the Tables section, and create the
-public `plant-photos` storage bucket (see [SETUP.md](SETUP.md)).
+Then run the `diagnoses`, `propagations`, and `care_recommendations` blocks from the
+Tables section, and create the public `plant-photos` storage bucket (see [SETUP.md](SETUP.md)).

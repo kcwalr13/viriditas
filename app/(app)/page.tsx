@@ -7,7 +7,7 @@
 // client for rendering.
 import { createClient } from '@/lib/supabase/server'
 import { computeStreak, computeWateringStatus, computeFertilizingStatus, URGENCY_ORDER } from '@/lib/utils'
-import type { CareLog, Plant, PlantPhoto, AnalysisResult } from '@/lib/types'
+import type { CareLog, Plant, PlantPhoto, AnalysisResult, CareRecommendation } from '@/lib/types'
 import TodayClient from './TodayClient'
 
 export type PlantCard = {
@@ -19,6 +19,14 @@ export type PlantCard = {
   lastFertilizedLog: CareLog | null
   daysSinceWatered: number | null
   daysSinceFertilized: number | null
+}
+
+// An assistant recommendation enriched with its plant's display data
+// (Phase 1 — rendered in the "§ Assistant" section and the task list).
+export type RecommendationCard = {
+  rec: CareRecommendation
+  plantNickname: string
+  coverPhotoUrl: string | null
 }
 
 // The "journal peek" — we use the most recent AI analysis for any plant as
@@ -45,13 +53,15 @@ export default async function TodayPage() {
     .order('created_at', { ascending: true })
 
   if (!plants || plants.length === 0) {
-    return <TodayClient cards={[]} streak={0} journalPeek={null} tendedToday={0} activityDays={[]} weeklyLogs={0} />
+    return <TodayClient cards={[]} streak={0} journalPeek={null} tendedToday={0} activityDays={[]} weeklyLogs={0} recommendations={[]} userId={user.id} />
   }
 
   const plantIds = plants.map(p => p.id)
 
-  // ── Photos + care logs (3 queries regardless of collection size) ───────
-  const [{ data: photos }, { data: careLogs }] = await Promise.all([
+  // ── Photos + care logs + open recommendations (one Promise.all) ────────
+  // The recommendations query soft-fails to an empty list on a database
+  // where the Phase 1 migration hasn't been run yet.
+  const [{ data: photos }, { data: careLogs }, { data: recRows }] = await Promise.all([
     supabase.from('photos')
       .select('*')
       .in('plant_id', plantIds)
@@ -60,6 +70,11 @@ export default async function TodayPage() {
       .select('*')
       .in('plant_id', plantIds)
       .order('logged_at', { ascending: false }),
+    supabase.from('care_recommendations')
+      .select('*')
+      .eq('user_id', user.id)
+      .in('status', ['proposed', 'accepted'])
+      .order('created_at', { ascending: false }),
   ])
 
   // Build lookup maps — first hit per plant_id = most recent.
@@ -162,5 +177,17 @@ export default async function TodayPage() {
   const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000)
   const weeklyLogs = (careLogs ?? []).filter(l => new Date(l.logged_at) >= sevenDaysAgo).length
 
-  return <TodayClient cards={cards} streak={streak} journalPeek={journalPeek} tendedToday={tendedToday} activityDays={activityDays} weeklyLogs={weeklyLogs} />
+  // ── Assistant recommendations, enriched with plant display data ────────
+  const recommendations: RecommendationCard[] = (recRows ?? []).flatMap((rec: CareRecommendation) => {
+    const p = plants.find(pl => pl.id === rec.plant_id)
+    if (!p) return []
+    const coverPhoto = coverPhotoMap.get(p.id)
+    return [{
+      rec,
+      plantNickname: p.nickname,
+      coverPhotoUrl: coverPhoto ? getPhotoUrl(coverPhoto.storage_path) : null,
+    }]
+  })
+
+  return <TodayClient cards={cards} streak={streak} journalPeek={journalPeek} tendedToday={tendedToday} activityDays={activityDays} weeklyLogs={weeklyLogs} recommendations={recommendations} userId={user.id} />
 }

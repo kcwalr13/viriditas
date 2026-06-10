@@ -175,6 +175,10 @@ export default function AddPlantPage() {
           user_id: user.id,
           nickname: nickname.trim(),
           species: finalSpecies,
+          // Phase 5 identity slice: a species only reaches this insert when
+          // the user confirmed the AI match or typed/picked a name themselves
+          // — both are owner assertions, so the identity starts verified.
+          is_name_verified: finalSpecies !== null,
           location: finalLocation,
           soil_type: soilType.trim() || null,
           acquired_date: acquiredDate || null,
@@ -391,6 +395,13 @@ function Step1({
                   {speciesConfirmed ? 'Confirmed' : 'Confirm'}
                 </Chip>
                 <Chip onClick={onReset}>Try another photo</Chip>
+              </div>
+              {/* Phase 5 identity slice: be explicit that this is the AI's
+                  guess until the owner confirms or corrects it. */}
+              <div className="mt-2 font-mono text-[9px] tracking-[0.1em] uppercase text-ink-muted">
+                {speciesConfirmed
+                  ? 'Confirmed — saved as verified'
+                  : 'AI-identified — tap Confirm, or correct it by name below'}
               </div>
             </>
           ) : (

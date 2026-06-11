@@ -29,7 +29,7 @@ Kyle is a beginner developer who relies on Claude to write most of the code. Alw
 | Auth | Supabase Auth via `@supabase/ssr` (cookie-based, SSR-safe) |
 | Database | Supabase (PostgreSQL) |
 | File/Photo Storage | Supabase Storage |
-| AI Integration | Supabase Edge Functions → Claude API (`claude-haiku-4-5-20251001`; `diagnose-plant` uses `claude-sonnet-4-6`; Gemini supported on `analyze-plant`/`fetch-species-info` via `AI_PROVIDER` secret) |
+| AI Integration | Supabase Edge Functions → Claude API only (`claude-haiku-4-5-20251001`; `diagnose-plant` uses `claude-sonnet-4-6`). Gemini + the `AI_PROVIDER` switch were retired in v1.8.0 |
 | Deployment | Vercel (auto-deploys on every push to main) |
 
 **Language:** TypeScript throughout. No `any` types.
@@ -73,6 +73,7 @@ viriditas/
     PlantPhoto.tsx          # Warm blocky gradient placeholder when no cover photo (deterministic from name)
     ui.tsx                  # StatusPip, Chip, BigTitle, SectionLabel, HairlineButton
     AssistantActionRow.tsx  # Recommendation row + DismissSheet + IntervalConfirmSheet (assistant Phase 1)
+    FlagFactSheet.tsx       # "Report an issue" sheet for species facts + FLAGGABLE_FIELDS (Phase 5)
     BottomNav.tsx           # Floating pill nav: Today / Plants / Explore / Me + camera FAB (routes to /camera)
     NavGuard.tsx            # Wraps BottomNav — hides it on /plant/*, /add-plant, and /camera
   lib/
@@ -82,6 +83,7 @@ viriditas/
     types.ts                # Plant, PlantPhoto, CareLog, AnalysisResult, SpeciesProfile, CareRecommendation
     utils.ts                # formatDate, relativeTime, fileToBase64, computeWateringStatus, computeFertilizingStatus, computeStreak, computeMaxStreak, CARE_LOG_LABELS, URGENCY_ORDER
     recommendations.ts      # care_recommendations mutations: accept/done/dismiss/apply-interval/expire + action→care-log map
+    seasonal.ts             # Phase 3 seasonal heuristics — rules table + prose-corroborated interval proposals
     notifications.ts        # Stub — web push not supported; no-op exports
   supabase/
     functions/
@@ -145,6 +147,7 @@ viriditas/
 - [x] Plant Detail `§ 08 · Tools` strip — three ToolTile cards linking to Time-lapse, Diagnose, and Lineage sub-screens
 - [x] **AI care assistant Phase 1 (v1.6.0)** — `analyze-plant` v2 emits 0–3 structured `actions` + optional `interval_suggestion`; client persists them to `care_recommendations` (graceful-fail if migration not run); Today gains an "Assistant — proposed" section with Accept/Done/Dismiss (+ dismiss-reason sheet), accepted tasks join the task list, interval changes apply only via a confirm sheet; Plant Detail renders the same rows in the AI diagnosis card; proposals expire after 14 days
 - [x] **Species identity verification (v1.6.0, Phase 5 P0 slice)** — dossier Confirm chip / VERIFIED tag, manual species edits set `is_name_verified`, Add Plant saves confirmed/typed species as verified, `analyze-plant` gets an identity-verified context line
+- [x] **Adaptive schedules + accuracy program (v1.8.0, Phase 3 + rest of Phase 5)** — `lib/seasonal.ts` rules table generates once-per-month seasonal interval proposals (prose-corroborated, silence over noise) through the Phase 1 confirm flow; toxicity renders with an "AI-generated — verify with your vet" caption; Gemini + `AI_PROVIDER` retired (Claude sole provider); `species_profile_flags` + Report-an-issue sheet (Plant Detail + Explore) + Me → Flagged facts review list
 - [x] **Interactive AI diagnosis (v1.7.0, Phase 2)** — `diagnose-plant` Edge Function (`claude-sonnet-4-6`, Claude-only): server-assembled context + session transcript + photos; replies with exactly one of question / photo_request / verdict; ≤3 server-tracked ask-turns then a forced verdict; honest Low-confidence verdicts with differential + safe steps; verdicts write `diagnoses` (verdict_id `'ai-session'`) and the client inserts `care_recommendations` proposals (next steps + follow-up). Diagnose screen: "Examine with AI" session UI (field-notes styling), Quick triage (static tree) retained, Past examinations history, 24h resume/abandon. Context builders extracted to `supabase/functions/_shared/`
 
 ## What Comes Next
@@ -287,6 +290,10 @@ Floating pill with four tabs: **Today / Plants / Explore / Me**, plus an accent-
 - All writes happen in the `diagnose-plant` function (service role); the client only reads (resume offer) and flips status to `abandoned`
 - Session photos live under `{userId}/{plantId}/diagnosis/…` in storage with **no `photos` row**
 
+`species_profile_flags` *(v1.8.0 — accuracy program; full SQL in `docs/DATABASE.md`; **applied in production 2026-06-11** — verified: 6 columns, RLS on, 1 policy)*
+- id, species_profile_id (FK → species_profiles, cascade), user_id, field, note (nullable), created_at
+- One row per user-reported issue with a species-guide fact; reviewed/resolved (deleted) under Me → Flagged facts; no auto-correction
+
 `care_recommendations` *(v1.6.0 — assistant Phase 1; full SQL in `docs/DATABASE.md`; **applied in production 2026-06-10** — verified: 14 columns, RLS on, 1 policy)*
 - id, plant_id, user_id, created_at, resolved_at (nullable)
 - source (CHECK: analysis/diagnosis/seasonal), source_id (uuid, nullable — the analysis row)
@@ -365,10 +372,11 @@ ALTER TABLE care_logs ADD CONSTRAINT care_logs_type_check CHECK (type IN (...all
 - See `fetchImageAsBase64` in `supabase/functions/_shared/images.ts` (extracted from analyze-plant in v1.7.0; both analyze-plant and diagnose-plant use it)
 
 ### AI Provider
-- Controlled by the `AI_PROVIDER` Supabase secret (`claude` or `gemini`)
-- Requires Edge Function redeploy after changing
-- Current: `claude` using `claude-haiku-4-5-20251001`
-- **Provider support is per-function:** only `analyze-plant` and `fetch-species-info` implement the Gemini path (`gemini-2.5-flash`). `identify-species` and `suggest-species` call Claude directly regardless of `AI_PROVIDER`.
+- **Claude only** (spec decision #1, implemented v1.8.0). The Gemini branches, the
+  `AI_PROVIDER` switch, and the `GEMINI_API_KEY` secret were retired; git history
+  preserves the old paths. Do not reintroduce a second provider.
+- Models: `claude-haiku-4-5-20251001` on the volume paths (analyze, species info,
+  identify, suggest); `claude-sonnet-4-6` on `diagnose-plant` (highest-stakes path).
 - Base64 encoding in Edge Functions: use Deno's std library (`import { encode as encodeBase64 } from 'https://deno.land/std@0.168.0/encoding/base64.ts'`)
 
 ### Analyze-Plant Context (Phase 15 — Gaps 1, 2, 3, 5)
@@ -512,3 +520,4 @@ When a version bumps, also add a matching entry to `CHANGELOG.md` (the human-fac
 - `1.5.2` — Plants list view: quick-log buttons now render on every row (the last Info item from the June 2026 review). Water is always loggable; feed shows whenever a fertilizing schedule exists; urgency is expressed by button color (solid danger/warn when due, quiet outline otherwise) instead of by the button appearing and disappearing.
 - `1.6.0` — AI care assistant Session A (`docs/ASSISTANT-SPEC.md` Phase 1 + Phase 5 identity slice): `care_recommendations` table + `analyze-plant` v2 (structured actions, interval suggestions, identity context, current-schedule context); Today "Assistant — proposed" section with Accept/Done/Dismiss and dismiss-reason sheet; accepted tasks join the task list; interval confirm sheet; Plant Detail inline action rows; 14-day proposal expiry; species identity verification (dossier Confirm chip/VERIFIED tag, verified manual edits, Add Plant verified saves).
 - `1.7.0` — AI care assistant Session B (Phase 2, the flagship): interactive diagnosis sessions. New `diagnosis_sessions` table + `diagnose-plant` Edge Function (`claude-sonnet-4-6`): server-assembled context, ≤3 server-tracked ask-turns, honest Low-confidence verdicts with differentials, verdict → `diagnoses` history + `care_recommendations` proposals (incl. scheduled follow-up). Diagnose screen rework: "Examine with AI" transcript UI, Quick triage retained, Past examinations list, 24h resume/abandon. Plant-context prompt builders extracted to `supabase/functions/_shared/` (analyze-plant redeploy required).
+- `1.8.0` — AI care assistant Session C (Phase 3 + rest of Phase 5): seasonal schedule review (`lib/seasonal.ts` heuristics, monthly localStorage gate, per-season dedupe, Phase 1 confirm flow); toxicity caution caption on Plant Detail + Explore; Gemini retirement (`analyze-plant` + `fetch-species-info` Claude-only, `AI_PROVIDER`/`GEMINI_API_KEY` secrets droppable, both functions need redeploy); species fact flagging (`species_profile_flags` table, Report-an-issue sheet on species guides, Me → Flagged facts review list).

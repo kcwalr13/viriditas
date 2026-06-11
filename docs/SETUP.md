@@ -61,6 +61,7 @@ supabase functions deploy analyze-plant --no-verify-jwt
 supabase functions deploy fetch-species-info --no-verify-jwt
 supabase functions deploy identify-species --no-verify-jwt
 supabase functions deploy suggest-species --no-verify-jwt
+supabase functions deploy diagnose-plant --no-verify-jwt
 ```
 
 `--no-verify-jwt` is required — the functions validate the user token themselves (see
@@ -70,9 +71,8 @@ supabase functions deploy suggest-species --no-verify-jwt
 
 ```bash
 supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
-supabase secrets set AI_PROVIDER=claude
-# Only if you intend to switch providers later:
-# supabase secrets set GEMINI_API_KEY=...
+# Claude is the sole provider (Gemini + AI_PROVIDER retired in v1.8.0) —
+# no other AI secrets are needed.
 ```
 
 Redeploy the functions after changing any secret.

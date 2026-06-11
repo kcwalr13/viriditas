@@ -2,7 +2,7 @@
 
 **Purpose:** request/response contract, auth model, error behavior, and deploy commands for
 the five Supabase Edge Functions that power the AI features. Source of truth is the code in
-`supabase/functions/*/index.ts`; this file mirrors it as of v1.7.0.
+`supabase/functions/*/index.ts`; this file mirrors it as of v1.8.0.
 
 > **Shared modules (v1.7.0):** `supabase/functions/_shared/` holds the plant-context
 > prompt builders (`plant-context.ts`) and image fetching with magic-byte type detection
@@ -38,19 +38,23 @@ Set via `supabase secrets set KEY=value` (functions must be redeployed to pick u
 | Secret | Used by | Notes |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | all five | required |
-| `AI_PROVIDER` | analyze-plant, fetch-species-info | `claude` (default if unset) or `gemini` |
-| `GEMINI_API_KEY` | analyze-plant, fetch-species-info | only needed when `AI_PROVIDER=gemini` |
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | (auto) | injected by Supabase; not set manually |
 
-### Provider support matrix
+> **Gemini retired (v1.8.0, spec decision #1):** the `AI_PROVIDER` switch, the Gemini
+> branches in `analyze-plant`/`fetch-species-info`, and the `GEMINI_API_KEY` secret are
+> gone — Claude is the sole provider (one product voice, one quality bar). The
+> `AI_PROVIDER` and `GEMINI_API_KEY` secrets can be unset in Supabase
+> (`supabase secrets unset AI_PROVIDER GEMINI_API_KEY`); git history preserves the old code.
 
-| Function | Claude | Gemini (`AI_PROVIDER=gemini`) |
-|---|---|---|
-| `analyze-plant` | ✅ `claude-haiku-4-5-20251001` | ✅ `gemini-2.5-flash` |
-| `fetch-species-info` | ✅ | ✅ |
-| `identify-species` | ✅ | ❌ always Claude |
-| `suggest-species` | ✅ | ❌ always Claude |
-| `diagnose-plant` | ✅ `claude-sonnet-4-6` | ❌ always Claude (by design — see spec) |
+### Models
+
+| Function | Model |
+|---|---|
+| `analyze-plant` | `claude-haiku-4-5-20251001` |
+| `fetch-species-info` | `claude-haiku-4-5-20251001` |
+| `identify-species` | `claude-haiku-4-5-20251001` |
+| `suggest-species` | `claude-haiku-4-5-20251001` |
+| `diagnose-plant` | `claude-sonnet-4-6` (highest-stakes path — see spec cost note) |
 
 ### Deploy
 

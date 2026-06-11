@@ -33,6 +33,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { Icon, type IconName } from '@/components/Icon'
 import { BigTitle, Chip, HairlineButton, SectionLabel } from '@/components/ui'
 import { AssistantActionRow, DismissSheet, IntervalConfirmSheet } from '@/components/AssistantActionRow'
+import { FlagFactSheet } from '@/components/FlagFactSheet'
 import { PlantPhoto as PlantPhotoPlaceholder } from '@/components/PlantPhoto'
 
 // ── Care-action taxonomy ────────────────────────────────────────────────
@@ -119,6 +120,9 @@ export default function PlantDetailPage() {
   const [dismissTarget,     setDismissTarget]     = useState<CareRecommendation | null>(null)
   const [intervalTarget,    setIntervalTarget]    = useState<CareRecommendation | null>(null)
   const [verifyingSpecies,  setVerifyingSpecies]  = useState(false)
+  // Phase 5 fact flagging: non-null = the report sheet is open, with the
+  // preselected field key (or null for "pick one").
+  const [flagSheetField,    setFlagSheetField]    = useState<string | null | false>(false)
   const [editing,           setEditing]           = useState(false)
   const [saving,          setSaving]        = useState(false)
   const [deleting,        setDeleting]      = useState(false)
@@ -1834,22 +1838,36 @@ export default function PlantDetailPage() {
             <SpeciesRow icon="humidity"    label="Humidity" value={speciesProfile.humidity} colorClass="text-accent" />
             <SpeciesRow icon="thermometer" label="Temp"     value={speciesProfile.temperature} colorClass="text-ink-soft" />
             <SpeciesRow icon="warning"     label="Toxic"    value={speciesProfile.toxicity} colorClass="text-danger" last={!speciesOpen} />
+            {/* Phase 5: toxicity is AI-generated content with pet-safety stakes —
+                say so wherever it renders. */}
+            {speciesProfile.toxicity && (
+              <p className="-mt-1 pb-3 font-mono text-[9px] tracking-[0.1em] uppercase text-ink-muted">
+                AI-generated — verify with your vet for pet-critical decisions.
+              </p>
+            )}
             {speciesOpen && (
               <div className="py-4 border-t border-dashed border-rule space-y-4">
-                {speciesProfile.soil && <SpeciesBlock label="Soil" value={speciesProfile.soil} />}
-                {speciesProfile.common_problems && <SpeciesBlock label="Common problems" value={speciesProfile.common_problems} />}
-                {speciesProfile.growth_habits && <SpeciesBlock label="Growth" value={speciesProfile.growth_habits} />}
-                {speciesProfile.propagation && <SpeciesBlock label="Propagation" value={speciesProfile.propagation} />}
-                {speciesProfile.pruning_tips && <SpeciesBlock label="Pruning" value={speciesProfile.pruning_tips} />}
-                {speciesProfile.disease_symptoms && <SpeciesBlock label="Disease symptoms" value={speciesProfile.disease_symptoms} />}
-                {speciesProfile.seasonal_care && <SpeciesBlock label="Seasonal care" value={speciesProfile.seasonal_care} />}
-                <div className="flex items-center gap-4">
+                {speciesProfile.soil && <SpeciesBlock label="Soil" value={speciesProfile.soil} onReport={() => setFlagSheetField('soil')} />}
+                {speciesProfile.common_problems && <SpeciesBlock label="Common problems" value={speciesProfile.common_problems} onReport={() => setFlagSheetField('common_problems')} />}
+                {speciesProfile.growth_habits && <SpeciesBlock label="Growth" value={speciesProfile.growth_habits} onReport={() => setFlagSheetField('growth_habits')} />}
+                {speciesProfile.propagation && <SpeciesBlock label="Propagation" value={speciesProfile.propagation} onReport={() => setFlagSheetField('propagation')} />}
+                {speciesProfile.pruning_tips && <SpeciesBlock label="Pruning" value={speciesProfile.pruning_tips} onReport={() => setFlagSheetField('pruning_tips')} />}
+                {speciesProfile.disease_symptoms && <SpeciesBlock label="Disease symptoms" value={speciesProfile.disease_symptoms} onReport={() => setFlagSheetField('disease_symptoms')} />}
+                {speciesProfile.seasonal_care && <SpeciesBlock label="Seasonal care" value={speciesProfile.seasonal_care} onReport={() => setFlagSheetField('seasonal_care')} />}
+                <div className="flex items-center gap-4 flex-wrap">
                   <button
                     onClick={() => fetchSpeciesProfileFromAI(knownSpecies, true)}
                     disabled={fetchingSpecies}
                     className="inline-flex items-center gap-1.5 text-xs text-accent font-medium disabled:opacity-50"
                   >
                     <Icon name="sparkle" size={12} stroke={1.9} /> {fetchingSpecies ? 'Refreshing…' : 'Refresh guide'}
+                  </button>
+                  {/* Phase 5: the correction path — refresh regenerates, this reports */}
+                  <button
+                    onClick={() => setFlagSheetField(null)}
+                    className="inline-flex items-center gap-1.5 text-xs text-ink-soft font-medium hover:text-ink"
+                  >
+                    <Icon name="warning" size={12} stroke={1.9} /> Report an issue
                   </button>
                   <a
                     href={`/explore?species=${encodeURIComponent(knownSpecies)}`}
@@ -2132,6 +2150,15 @@ export default function PlantDetailPage() {
           onConfirm={() => handleIntervalConfirm(intervalTarget)}
         />
       )}
+      {flagSheetField !== false && speciesProfile && (
+        <FlagFactSheet
+          speciesProfileId={speciesProfile.id}
+          speciesName={speciesProfile.species_name}
+          initialField={flagSheetField}
+          onClose={() => setFlagSheetField(false)}
+          onFlagged={() => showToast('Reported — see Me → Flagged facts')}
+        />
+      )}
 
       {/* ── Toast ─────────────────────────────────────────────────────── */}
       {toast && (
@@ -2379,11 +2406,23 @@ function SpeciesRow({
   )
 }
 
-function SpeciesBlock({ label, value }: { label: string; value: string }) {
+function SpeciesBlock({ label, value, onReport }: { label: string; value: string; onReport?: () => void }) {
   return (
     <div>
-      <div className="font-mono text-[10px] tracking-[0.14em] text-ink-soft uppercase font-semibold mb-1">
-        {label}
+      <div className="flex items-center justify-between mb-1">
+        <div className="font-mono text-[10px] tracking-[0.14em] text-ink-soft uppercase font-semibold">
+          {label}
+        </div>
+        {/* Phase 5: per-section "report an issue" affordance */}
+        {onReport && (
+          <button
+            onClick={onReport}
+            aria-label={`Report an issue with ${label}`}
+            className="text-ink-muted hover:text-warn"
+          >
+            <Icon name="warning" size={11} stroke={1.8} />
+          </button>
+        )}
       </div>
       <p className="font-serif text-[14px] text-ink leading-relaxed" style={{ textWrap: 'pretty' as React.CSSProperties['textWrap'] }}>
         {value}

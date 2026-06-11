@@ -155,6 +155,34 @@ Column notes:
 - Session photos live in storage under `{userId}/{plantId}/diagnosis/…` and are **not**
   rows in `photos` (keeps Timelapse and the photo strip clean).
 
+### `species_profile_flags` *(v1.8.0 — Phase 5 of docs/ASSISTANT-SPEC.md; **applied in production 2026-06-11** — verified: 6 columns, RLS on, 1 policy)*
+
+User-reported issues with cached species-guide content (the accuracy program's
+correction signal). Created from the "Report an issue" sheet on the Plant Detail species
+guide and Explore profiles; listed (and resolved by deletion) under Me → Flagged facts.
+**No auto-correction** — flags are for review only. The app degrades gracefully when
+this table is missing. Full DDL:
+
+```sql
+create table if not exists species_profile_flags (
+  id uuid primary key default gen_random_uuid(),
+  species_profile_id uuid not null references species_profiles(id) on delete cascade,
+  user_id uuid not null references auth.users(id),
+  field text not null,
+  note text,
+  created_at timestamptz not null default now()
+);
+alter table species_profile_flags enable row level security;
+create policy "Users manage own species_profile_flags" on species_profile_flags
+  for all using (auth.uid() = user_id);
+```
+
+Column notes:
+- `field` — which `species_profiles` column looks wrong (e.g. `toxicity`, `watering`);
+  the app constrains values to the flaggable-field list in `components/FlagFactSheet.tsx`
+  (no DB CHECK — the spec's Appendix A defines none).
+- Reads join the species name via the `species_profile_id` FK.
+
 ### `care_recommendations` *(v1.6.0 — Phase 1 of docs/ASSISTANT-SPEC.md; **applied in production 2026-06-10** — verified: 14 columns, RLS on, 1 policy)*
 
 Structured next steps proposed by the assistant. Created by the **client** after an AI
@@ -302,9 +330,9 @@ ALTER TABLE plants ADD COLUMN IF NOT EXISTS is_name_verified boolean DEFAULT fal
 ```
 
 Plus the `diagnoses` and `propagations` blocks above (applied 2026-06-09), the
-`care_recommendations` block above (applied 2026-06-10), and the `diagnosis_sessions`
-block above (**v1.7.0 — NOT yet applied in production**; run it in the Supabase SQL
-editor before using the AI examination).
+`care_recommendations` block (applied 2026-06-10), the `diagnosis_sessions` block
+(applied 2026-06-10), and the `species_profile_flags` block above (**v1.8.0 — NOT yet
+applied in production**; run it in the Supabase SQL editor before using fact flagging).
 
 > Phase 15 note: the journaling columns are nullable with no backfill **on purpose** —
 > backfilling `'general'` onto old notes would mislead the AI into treating uncategorized
@@ -415,5 +443,6 @@ create policy "Authenticated users read species profiles" on species_profiles
   for select using (auth.role() = 'authenticated');
 ```
 
-Then run the `diagnoses`, `propagations`, `care_recommendations`, and `diagnosis_sessions`
-blocks from the Tables section, and create the public `plant-photos` storage bucket (see [SETUP.md](SETUP.md)).
+Then run the `diagnoses`, `propagations`, `care_recommendations`, `diagnosis_sessions`,
+and `species_profile_flags` blocks from the Tables section, and create the public
+`plant-photos` storage bucket (see [SETUP.md](SETUP.md)).

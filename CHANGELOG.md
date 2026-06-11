@@ -4,6 +4,33 @@ All notable user-facing changes to Viriditas, newest first. The version number l
 `package.json` and is shown on the Me screen; versioning rules are in
 [CLAUDE.md → Versioning Convention](CLAUDE.md). Documentation-only changes don't bump the version.
 
+## 1.8.0 — 2026-06-11
+
+Adaptive schedules + accuracy program — Session C (Phase 3 + the rest of Phase 5) of
+[docs/ASSISTANT-SPEC.md](docs/ASSISTANT-SPEC.md).
+
+- **Seasonal schedule review (Phase 3):** when the month rolls over, Today generates
+  local (non-AI) schedule proposals from each scheduled plant's cached species-guide
+  `seasonal_care` prose + the current season (e.g. winter → stretch watering ~40%,
+  pause-feeding signals → double the fertilizing interval, summer → tighten watering).
+  Heuristics live in `lib/seasonal.ts` as a commented rules table; a proposal is emitted
+  only when the species guide corroborates the direction — no prose, no proposal.
+  At most one proposal per plant per care type per season; dismissing suppresses that
+  plant+type until next season; accepting goes through the existing confirm sheet.
+- **Toxicity caution line (Phase 5):** wherever toxicity renders (Plant Detail species
+  guide, Explore species profile), a one-line mono caption now states: "AI-generated —
+  verify with your vet for pet-critical decisions." Honest authority over implied authority.
+- **Gemini retired (Phase 5, spec decision #1):** the Gemini branches and the
+  `AI_PROVIDER` switch were removed from `analyze-plant` and `fetch-species-info` —
+  Claude is the sole provider (both functions need a redeploy). The `AI_PROVIDER` and
+  `GEMINI_API_KEY` Supabase secrets can be unset; git history preserves the old paths.
+- **Species fact flagging (Phase 5):** new `species_profile_flags` table (migration must
+  be run in production) + a "Report an issue" sheet on the Plant Detail species guide
+  (per-section flag affordances + a general link) and Explore profiles — pick the field
+  that looks wrong, optionally say why. Reports collect under **Me → Flagged facts**
+  for review and can be resolved there. No auto-correction — the shared species cache
+  only changes through deliberate review.
+
 ## 1.7.0 — 2026-06-10
 
 Interactive AI diagnosis sessions — Session B (Phase 2, the flagship) of

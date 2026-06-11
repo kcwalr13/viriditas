@@ -8,7 +8,7 @@ This file is the single source of truth for **where the app stands, what's open,
 
 ---
 
-## Current State (v1.7.0 — June 2026)
+## Current State (v1.8.0 — June 2026)
 
 **Live URL:** https://viriditas-three.vercel.app/
 **Repo:** https://github.com/kcwalr13/viriditas (auto-deploys `main` → Vercel)
@@ -56,10 +56,11 @@ reviewable next steps that flow into the Today task list (Phase 1 of
   + identity context, v1.6.0), `diagnose-plant` (interactive diagnosis sessions on
   `claude-sonnet-4-6`, v1.7.0), `fetch-species-info`, `identify-species`,
   `suggest-species`. All five require a valid Supabase session (`getUser()`), hardened
-  v1.5.0 (SSRF imageUrl allowlist, explicit-field upserts, MIME allowlist). Claude Haiku
-  (`claude-haiku-4-5-20251001`) on the volume paths; Gemini swappable on
-  analyze-plant/fetch-species-info via `AI_PROVIDER`. Shared prompt-context builders live
-  in `supabase/functions/_shared/`. Reference: [docs/EDGE-FUNCTIONS.md](docs/EDGE-FUNCTIONS.md).
+  v1.5.0 (SSRF imageUrl allowlist, explicit-field upserts, MIME allowlist). Claude is the
+  **sole provider** (Gemini + `AI_PROVIDER` retired v1.8.0): Haiku
+  (`claude-haiku-4-5-20251001`) on the volume paths, Sonnet on diagnose-plant. Shared
+  prompt-context builders live in `supabase/functions/_shared/`.
+  Reference: [docs/EDGE-FUNCTIONS.md](docs/EDGE-FUNCTIONS.md).
 - **AI care assistant (Phase 1, v1.6.0)** — analyses emit 0–3 structured actions + optional
   schedule suggestions → `care_recommendations` proposals → Today's "Assistant" section
   with Accept / Done (auto-logs unambiguous care types) / Dismiss-with-reason; accepted
@@ -71,10 +72,15 @@ reviewable next steps that flow into the Today task list (Phase 1 of
   verdict; honest Low-confidence verdicts with differentials). Verdicts write the
   `diagnoses` history and feed Phase 1's loop as proposals, including a scheduled
   follow-up check. Quick triage (static tree) retained; sessions resume for 24h.
+- **AI care assistant (Phase 3 + accuracy program, v1.8.0)** — monthly seasonal schedule
+  review (`lib/seasonal.ts` rules, corroborated by each species guide's seasonal-care
+  prose; one proposal max per plant per care type per season; Phase 1 confirm flow);
+  toxicity renders with an "AI-generated — verify with your vet" caption; species fact
+  flagging (Report an issue → `species_profile_flags` → Me → Flagged facts review list).
 - **Data layer** — `plants`, `photos`, `care_logs`, `analysis_results`, `species_profiles`,
-  `diagnoses`, `propagations` (applied in production 2026-06-09), `care_recommendations`
-  (applied 2026-06-10), `diagnosis_sessions` (v1.7.0 — **migration pending production**).
-  Schema reference: [docs/DATABASE.md](docs/DATABASE.md).
+  `diagnoses`, `propagations` (applied in production 2026-06-09), `care_recommendations` +
+  `diagnosis_sessions` (applied 2026-06-10), `species_profile_flags` (v1.8.0 —
+  **migration pending production**). Schema reference: [docs/DATABASE.md](docs/DATABASE.md).
 
 ---
 
@@ -87,7 +93,8 @@ reviewable next steps that flow into the Today task list (Phase 1 of
 | Test account credential in git history | ✅ | The old `ROADMAP_CURRENT.md` contained the `uitester` test-account credential in plaintext; it remains in git history even though the file is deleted. **Closed as accepted risk (Kyle, 2026-06-10):** it's a placeholder test account, the repo is private, and exposure doesn't matter. Do not re-flag in future reviews. Revisit only if the repo gains collaborators or goes public; keep future credentials out of the repo regardless. |
 | Re-enable Supabase email confirmation | ⬜ | Disabled for development convenience; required before sharing with real users. |
 | Apply the `care_recommendations` migration in production | ✅ | Applied 2026-06-10 (verified: 14 columns, RLS on, 1 policy). |
-| Apply the `diagnosis_sessions` migration + deploy v1.7.0 functions | ⬜ | **Required for the v1.7.0 AI examination.** Run the `diagnosis_sessions` DDL from [docs/DATABASE.md](docs/DATABASE.md); `supabase functions deploy diagnose-plant --no-verify-jwt`; **redeploy `analyze-plant`** (it now imports from `_shared/`). Until then the Diagnose screen offers the AI flow but sessions fail gracefully with an error message. |
+| Apply the `diagnosis_sessions` migration + deploy v1.7.0 functions | ✅ | Migration applied 2026-06-10 (verified: 10 columns, RLS on, 1 policy). |
+| Apply the `species_profile_flags` migration + deploy v1.8.0 functions | ⬜ | **Required for v1.8.0.** Run the `species_profile_flags` DDL from [docs/DATABASE.md](docs/DATABASE.md); **redeploy `analyze-plant` and `fetch-species-info`** (Gemini branches removed). Optionally `supabase secrets unset AI_PROVIDER GEMINI_API_KEY`. Until the migration runs, fact flagging shows a friendly error; everything else works. |
 | Verify / apply `is_name_verified` migration | ✅ | Column confirmed live in production 2026-06-10 (boolean, default false); v1.6.0 shipped the code that reads/writes it (dossier Confirm chip, manual edits, Add Plant, analysis identity context). |
 | Tag releases in git | ⬜ | Versions exist in `package.json`/CHANGELOG but there are no git tags. Optional, cheap, useful. |
 
@@ -99,7 +106,7 @@ reviewable next steps that flow into the Today task list (Phase 1 of
 | Cover photo designation + reordering | ⬜ | Cover photo is always the most recent upload. Individual photo *delete* exists (lightbox + strip); choosing/reordering does not. |
 | AI-assisted Diagnose | ✅ | Shipped v1.7.0 as full interactive sessions (`diagnose-plant`) — beyond the original "pass answers to analyze-plant" idea. The static tree remains as Quick triage. |
 | Lineage v2 — link child plants | ⬜ | `propagations.child_plant_id` is already nullable-ready; UI to link a propagation to a registered plant (and render a real graph) is unbuilt. |
-| Hemisphere setting | ⬜ | Season context passed to the AI hardcodes `northern`; southern-hemisphere users get inverted seasonal advice. |
+| Hemisphere setting | ⬜ | Season context passed to the AI hardcodes `northern`, and `lib/seasonal.ts` (v1.8.0) derives seasons the same way; southern-hemisphere users get inverted seasonal advice and proposals. |
 | Per-plant streak / streak history view | ⬜ | Streak strip currently links to Me; a dedicated history view was the intended destination. |
 
 ### Larger / post-MVP
@@ -149,14 +156,21 @@ Full detail: [CHANGELOG.md](CHANGELOG.md) per version, git log per commit.
   interactive diagnosis sessions via the new `diagnose-plant` Edge Function
   (`claude-sonnet-4-6`) — bounded ask-back loop (≤3 turns), honest uncertainty, verdicts
   into `diagnoses` + Today proposals; Diagnose screen reworked around "Examine with AI";
-  shared `_shared/plant-context.ts` extraction. Remaining sessions: C = adaptive
-  schedules + rest of accuracy program (Phases 3+5), D = web push (Phase 4).
+  shared `_shared/plant-context.ts` extraction.
+- **2026-06-11 — AI care assistant Session C (v1.8.0).** Phase 3 + the rest of Phase 5:
+  monthly seasonal schedule proposals (prose-corroborated heuristics in
+  `lib/seasonal.ts`, silence over noise); toxicity caution captions; Gemini +
+  `AI_PROVIDER` retired (Claude sole provider, decision #1); species fact flagging
+  (`species_profile_flags` + Report-an-issue sheet + Me → Flagged facts). Remaining:
+  Session D = web push (Phase 4).
 
 ### Key decisions log
 
 - **2026-03-26** — Tech stack: Supabase + Claude API (originally with Expo).
 - **2026-03-27** — AI provider switched from Gemini (dev quota issues) to Claude
   (`claude-haiku-4-5`); Edge Functions kept provider-swappable via `AI_PROVIDER`.
+  *(Superseded 2026-06-11: the swap path was never used again and was retired in
+  v1.8.0 — Claude is the sole provider; see docs/ASSISTANT-SPEC.md decision #1.)*
 - **2026-03-27** — Species data comes from Claude, not a third-party plant API: no catalog
   paywalls, covers any species, cached once per species globally in `species_profiles`.
 - **2026-03-30** — **Architecture pivot: Expo → Next.js 15.** App was already used via

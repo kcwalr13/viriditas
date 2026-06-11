@@ -19,13 +19,13 @@ structural changes. Conventions and gotchas for day-to-day coding live in
 │  • Auth (email/password; cookie sessions via @supabase/ssr) │
 │  • Postgres + RLS (per-user rows; shared species cache)     │
 │  • Storage: public `plant-photos` bucket                    │
-│  • Edge Functions (Deno): analyze-plant, fetch-species-info,│
-│    identify-species, suggest-species                        │
+│  • Edge Functions (Deno): analyze-plant, diagnose-plant,    │
+│    fetch-species-info, identify-species, suggest-species    │
 └───────────────────────────┬─────────────────────────────────┘
                             │ server-side fetch (keys never in browser)
                             ▼
-              Anthropic Claude API (claude-haiku-4-5)
-              [Gemini optional on two functions via AI_PROVIDER]
+              Anthropic Claude API (sole provider since v1.8.0:
+              claude-haiku-4-5; claude-sonnet-4-6 for diagnose-plant)
 ```
 
 There is no Next.js API layer of our own: the browser talks to Supabase directly (RLS is the
@@ -93,10 +93,8 @@ entered) or the latest `analysis_results.species` (AI-identified). Always resolv
 
 Full contracts: [EDGE-FUNCTIONS.md](EDGE-FUNCTIONS.md).
 
-**Provider switch:** the `AI_PROVIDER` secret (`claude`/`gemini`) selects the model in
-`analyze-plant` and `fetch-species-info`; the other three are Claude-only
-(`diagnose-plant` deliberately so — see docs/ASSISTANT-SPEC.md). Changing it
-requires redeploying the functions.
+**Provider:** Claude only — the `AI_PROVIDER` switch and Gemini branches were retired
+in v1.8.0 (spec decision #1). Haiku on the volume paths, Sonnet on `diagnose-plant`.
 
 **Security model (since v1.5.0):** all five functions are deployed `--no-verify-jwt` but
 authenticate every call via `getUser()`; `analyze-plant` only fetches images from this

@@ -1,8 +1,9 @@
 // supabase/functions/analyze-plant/index.ts
 //
 // Edge Function that analyzes a plant photo using an AI vision model.
-// The AI provider is controlled by the AI_PROVIDER environment variable,
-// making it easy to swap between Claude and Gemini without changing app code.
+// Provider: Claude only (claude-haiku-4-5). The Gemini branch and the
+// AI_PROVIDER switch were retired in v1.8.0 (spec decision #1 — one product
+// voice, one quality bar); git history preserves the old paths.
 //
 // Accepts:
 //   imageUrl         — public URL to the plant photo (required)
@@ -205,34 +206,6 @@ async function callClaude(base64Image: string, mediaType: ImageMediaType, prompt
   return text
 }
 
-// ── Gemini ────────────────────────────────────────────────────────────────────
-
-async function callGemini(base64Image: string, mediaType: ImageMediaType, prompt: string): Promise<string> {
-  const apiKey = Deno.env.get('GEMINI_API_KEY')
-  if (!apiKey) throw new Error('GEMINI_API_KEY secret is not set')
-
-  const model = 'gemini-2.5-flash'
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{
-        parts: [
-          { inline_data: { mime_type: mediaType, data: base64Image } },
-          { text: prompt },
-        ],
-      }],
-      generationConfig: { responseMimeType: 'application/json' },
-    }),
-  })
-
-  const data = await response.json()
-  if (!response.ok) throw new Error(data.error?.message ?? 'Gemini API error')
-  return data.candidates[0].content.parts[0].text
-}
-
 // ── Main handler ──────────────────────────────────────────────────────────────
 
 serve(async (req) => {
@@ -297,17 +270,7 @@ serve(async (req) => {
 
     const { base64: base64Image, mediaType } = await fetchImageAsBase64(imageUrl)
 
-    const provider = Deno.env.get('AI_PROVIDER') ?? 'claude'
-    let resultText: string
-
-    if (provider === 'claude') {
-      resultText = await callClaude(base64Image, mediaType, prompt)
-    } else if (provider === 'gemini') {
-      resultText = await callGemini(base64Image, mediaType, prompt)
-    } else {
-      throw new Error(`Unknown AI_PROVIDER: ${provider}`)
-    }
-
+    const resultText = await callClaude(base64Image, mediaType, prompt)
     const result = JSON.parse(resultText)
 
     // Clamp health_score to the valid 1–5 range in case the model drifts

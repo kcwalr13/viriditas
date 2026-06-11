@@ -18,6 +18,7 @@ import { fileToBase64, formatTimestamp, relativeTime } from '@/lib/utils'
 import type { SpeciesProfile } from '@/lib/types'
 import { useEffect, useRef, useState } from 'react'
 import { BigTitle, HairlineButton, SectionLabel } from '@/components/ui'
+import { FlagFactSheet } from '@/components/FlagFactSheet'
 import { Icon } from '@/components/Icon'
 import { PlantPhoto, paletteFor } from '@/components/PlantPhoto'
 
@@ -557,6 +558,10 @@ function SpeciesDetail({
   matchingPlants: Array<{ id: string; nickname: string; species: string | null }>
 }) {
   const [heroThumb, setHeroThumb] = useState<string | null>(null)
+  // Phase 5 fact flagging: false = sheet closed; null/string = open (with
+  // an optional preselected field key).
+  const [flagField, setFlagField] = useState<string | null | false>(false)
+  const [flagSaved, setFlagSaved] = useState(false)
 
   useEffect(() => {
     const query = profile.scientific_name || profile.species_name
@@ -681,6 +686,11 @@ function SpeciesDetail({
             <p className="font-serif text-[14px] text-ink leading-relaxed" style={{ textWrap: 'pretty' as React.CSSProperties['textWrap'] }}>
               {profile.toxicity}
             </p>
+            {/* Phase 5: honest authority beats implied authority — toxicity is
+                AI-generated content, and pets are a high-stakes consumer of it. */}
+            <p className="mt-2 font-mono text-[9px] tracking-[0.1em] uppercase text-ink-muted">
+              AI-generated — verify with your vet for pet-critical decisions.
+            </p>
           </div>
         </>
       )}
@@ -707,14 +717,38 @@ function SpeciesDetail({
         </>
       )}
 
-      <div className="mt-6 mx-5 flex items-center justify-between">
+      <div className="mt-6 mx-5 flex items-center justify-between gap-3 flex-wrap">
         <p className="text-[11px] text-ink-muted font-mono tracking-[0.06em]">
           Guide generated {formatTimestamp(profile.fetched_at)}
         </p>
-        <HairlineButton variant="outline" onClick={onRefresh}>
-          <Icon name="sparkle" size={12} stroke={1.9} /> Refresh
-        </HairlineButton>
+        <div className="flex items-center gap-2">
+          {/* Phase 5: refresh regenerates blind — this reports what's wrong */}
+          <button
+            onClick={() => setFlagField(null)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-full border border-rule text-[12px] font-medium text-ink-soft"
+          >
+            <Icon name="warning" size={12} stroke={1.9} /> Report an issue
+          </button>
+          <HairlineButton variant="outline" onClick={onRefresh}>
+            <Icon name="sparkle" size={12} stroke={1.9} /> Refresh
+          </HairlineButton>
+        </div>
       </div>
+      {flagSaved && (
+        <div className="mt-2.5 mx-5 flex items-center gap-2 px-3.5 py-2.5 bg-accent-soft border border-rule rounded-brand">
+          <Icon name="check" size={13} stroke={2.2} className="text-accent shrink-0" />
+          <span className="text-[12px] text-accent">Reported — see Me &rarr; Flagged facts.</span>
+        </div>
+      )}
+      {flagField !== false && (
+        <FlagFactSheet
+          speciesProfileId={profile.id}
+          speciesName={profile.species_name}
+          initialField={flagField}
+          onClose={() => setFlagField(false)}
+          onFlagged={() => setFlagSaved(true)}
+        />
+      )}
 
       <div className="mt-5 px-5 flex flex-col gap-2.5 pb-4">
         {matchingPlants.length === 0 ? (

@@ -160,6 +160,18 @@ export type DiagnoseReply =
   | { type: 'photo_request'; text: string; why: string }
   | ({ type: 'verdict' } & DiagnosisVerdict)
 
+// ── Species fact flags (Phase 5 — accuracy program) ─────────────────────────
+// A user-reported issue with one field of a cached species profile. Flags are
+// for review (Settings → Flagged facts) — there is no auto-correction.
+export type SpeciesProfileFlag = {
+  id: string
+  species_profile_id: string
+  user_id: string
+  field: string          // which species_profiles column looks wrong
+  note: string | null    // optional detail from the reporter
+  created_at: string
+}
+
 // Encyclopedic species reference data — fetched once per species via the
 // fetch-species-info Edge Function and cached permanently in Supabase.
 // Shared across all users (one row per species).

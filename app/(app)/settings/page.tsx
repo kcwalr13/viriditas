@@ -6,7 +6,8 @@ import { useRouter } from 'next/navigation'
 import { useState, useEffect } from 'react'
 import { BigTitle, SectionLabel } from '@/components/ui'
 import { Icon } from '@/components/Icon'
-import { computeStreak, computeMaxStreak, relativeTime } from '@/lib/utils'
+import { computeStreak, computeMaxStreak, relativeTime, formatTimestamp } from '@/lib/utils'
+import { flagFieldLabel } from '@/components/FlagFactSheet'
 import pkg from '@/package.json'
 
 export default function MePage() {
@@ -22,6 +23,9 @@ export default function MePage() {
   const [activeDay,   setActiveDay]   = useState<string | null>(null)
   const [lastTended,  setLastTended]  = useState<{ nickname: string; loggedAt: string } | null>(null)
   const [tendedThisWeek, setTendedThisWeek] = useState<number | null>(null)
+  const [flaggedFacts, setFlaggedFacts] = useState<Array<{
+    id: string; field: string; note: string | null; created_at: string; speciesName: string
+  }>>([])
   const [locationBreakdown, setLocationBreakdown] = useState<Array<{ location: string; count: number }> | null>(null)
 
   useEffect(() => {
@@ -81,6 +85,23 @@ export default function MePage() {
           .map(([location, count]) => ({ location, count }))
           .sort((a, b) => b.count - a.count)
         if (breakdown.some(b => b.location !== 'Unassigned')) setLocationBreakdown(breakdown)
+      }
+      // Phase 5: flagged species facts — the user's open accuracy reports.
+      // Separate query with a graceful fail (the table may not exist yet).
+      const { data: flags, error: flagErr } = await supabase
+        .from('species_profile_flags')
+        .select('id, field, note, created_at, species_profiles(species_name)')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+      if (!flagErr && flags) {
+        setFlaggedFacts(flags.map(f => ({
+          id: f.id as string,
+          field: f.field as string,
+          note: f.note as string | null,
+          created_at: f.created_at as string,
+          // The FK join comes back as an object (single relation)
+          speciesName: (f.species_profiles as unknown as { species_name: string } | null)?.species_name ?? 'Unknown species',
+        })))
       }
       // Find oldest plant by acquired_date
       if (allPlants && allPlants.length > 0) {
@@ -270,6 +291,44 @@ export default function MePage() {
           <Icon name="chev" size={14} className="text-danger/70" />
         </button>
       </div>
+
+      {/* ── Flagged facts (Phase 5 accuracy program) ──────────────────── */}
+      {flaggedFacts.length > 0 && (
+        <>
+          <SectionLabel number="§ —" title={`Flagged facts — ${flaggedFacts.length}`} />
+          <div className="mx-5 bg-card border border-rule rounded-brand-lg px-4">
+            {flaggedFacts.map((f, i) => (
+              <div key={f.id} className={`py-3 ${i === flaggedFacts.length - 1 ? '' : 'border-b border-dashed border-rule'}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-mono text-[8px] tracking-[0.1em] uppercase px-1.5 py-0.5 rounded-full bg-warn-soft text-warn shrink-0">
+                      {flagFieldLabel(f.field)}
+                    </span>
+                    <span className="font-serif italic text-[14px] text-ink truncate">{f.speciesName}</span>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      // Resolve = delete the flag (review is done by reading it here).
+                      await supabase.from('species_profile_flags').delete().eq('id', f.id)
+                      setFlaggedFacts(prev => prev.filter(x => x.id !== f.id))
+                    }}
+                    aria-label="Resolve flag"
+                    className="text-ink-muted hover:text-accent shrink-0"
+                  >
+                    <Icon name="check" size={14} stroke={2} />
+                  </button>
+                </div>
+                {f.note && (
+                  <p className="mt-1 text-[12px] text-ink-soft leading-snug">{f.note}</p>
+                )}
+                <p className="mt-1 font-mono text-[9px] tracking-[0.08em] uppercase text-ink-muted">
+                  Reported {formatTimestamp(f.created_at)}
+                </p>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       {/* ── About ─────────────────────────────────────────────────────── */}
       <SectionLabel number={oldestPlant ? '§ 05' : '§ 04'} title="About" />

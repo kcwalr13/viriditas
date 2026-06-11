@@ -17,9 +17,9 @@
 // Because profiles are shared across all users, the AI is called at most once
 // per species ever — subsequent users with the same plant get the cached version.
 //
-// Supported providers (set via AI_PROVIDER secret):
-//   claude  — Anthropic Claude API (current default)
-//   gemini  — Google Gemini
+// Provider: Claude only. The Gemini branch and the AI_PROVIDER switch were
+// retired in v1.8.0 (spec decision #1 — one product voice, one quality bar);
+// git history preserves the old paths.
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
@@ -92,30 +92,6 @@ async function callClaude(speciesName: string): Promise<Record<string, string>> 
   let text: string = data.content[0].text
   text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim()
   return JSON.parse(text)
-}
-
-// ── Gemini ────────────────────────────────────────────────────────────────────
-
-async function callGemini(speciesName: string): Promise<Record<string, string>> {
-  const apiKey = Deno.env.get('GEMINI_API_KEY')
-  if (!apiKey) throw new Error('GEMINI_API_KEY secret is not set')
-
-  const model = 'gemini-2.5-flash'
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
-
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: buildSpeciesPrompt(speciesName) }] }],
-      generationConfig: { responseMimeType: 'application/json' },
-    }),
-  })
-
-  const data = await response.json()
-  if (!response.ok) throw new Error(data.error?.message ?? 'Gemini API error')
-
-  return JSON.parse(data.candidates[0].content.parts[0].text)
 }
 
 // ── Profile field whitelist ───────────────────────────────────────────────────
@@ -219,16 +195,7 @@ serve(async (req) => {
 
     console.log('Fetching new species profile for:', normalizedName)
 
-    const provider = Deno.env.get('AI_PROVIDER') ?? 'claude'
-    let profileFields: Record<string, string>
-
-    if (provider === 'claude') {
-      profileFields = await callClaude(normalizedName)
-    } else if (provider === 'gemini') {
-      profileFields = await callGemini(normalizedName)
-    } else {
-      throw new Error(`Unknown AI_PROVIDER: ${provider}`)
-    }
+    const profileFields = await callClaude(normalizedName)
 
     // ── Save to database ─────────────────────────────────────────────────────
 

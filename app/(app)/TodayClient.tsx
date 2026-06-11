@@ -15,6 +15,7 @@ import {
   acceptRecommendation, completeRecommendation, dismissRecommendation,
   applyIntervalSuggestion, expireStaleRecommendations,
 } from '@/lib/recommendations'
+import { getSeason, seasonStart, buildSeasonalProposal } from '@/lib/seasonal'
 import { createClient } from '@/lib/supabase/client'
 import type { NoteCategory, DismissedReason } from '@/lib/types'
 import type { PlantCard, JournalPeek, RecommendationCard } from './page'
@@ -88,6 +89,100 @@ export default function TodayClient({ cards, streak, journalPeek, tendedToday, a
     expireStaleRecommendations(createClient(), userId).then(count => {
       if (count > 0) router.refresh()
     })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId])
+
+  // Phase 3 seasonal review: when the month rolls over, generate local
+  // (non-AI) schedule proposals from each scheduled plant's cached
+  // species-guide seasonal_care prose + the current season. Proposals are
+  // ordinary care_recommendations rows, so Phase 1's confirm-sheet flow
+  // applies unchanged. The localStorage key gates the check to once per
+  // month; the per-season dedupe (any seasonal row for plant+type since the
+  // season started, whatever its status) keeps dismissals suppressed until
+  // the next season.
+  useEffect(() => {
+    const SEASONAL_CHECK_KEY = 'viriditas.lastSeasonalCheck'
+    const today = new Date()
+    const monthKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`
+    if (localStorage.getItem(SEASONAL_CHECK_KEY) === monthKey) return
+
+    async function runSeasonalReview() {
+      try {
+        const supabase = createClient()
+        const season = getSeason(today.getMonth() + 1)
+
+        // Only plants with a known species AND at least one schedule qualify.
+        const candidates = cards.filter(c =>
+          c.plant.species && (c.plant.watering_interval_days || c.plant.fertilizing_interval_days))
+        if (candidates.length === 0) {
+          localStorage.setItem(SEASONAL_CHECK_KEY, monthKey)
+          return
+        }
+
+        // Cached seasonal-care prose for the candidate species.
+        const speciesNames = [...new Set(candidates.map(c => c.plant.species as string))]
+        const { data: profiles, error: profErr } = await supabase
+          .from('species_profiles')
+          .select('species_name, seasonal_care')
+          .in('species_name', speciesNames)
+        if (profErr) return  // leave the key unset so the check retries next load
+        const proseMap = new Map<string, string | null>(
+          (profiles ?? []).map(p => [p.species_name as string, p.seasonal_care as string | null]))
+
+        // Dedupe: one proposal per plant per care type per season, including
+        // dismissed ones (dismiss = "not this season").
+        const { data: existing, error: exErr } = await supabase
+          .from('care_recommendations')
+          .select('plant_id, interval_suggestion')
+          .eq('user_id', userId)
+          .eq('source', 'seasonal')
+          .gte('created_at', seasonStart(today).toISOString())
+        if (exErr) return
+        const blocked = new Set(
+          (existing ?? []).map(r => `${r.plant_id}-${r.interval_suggestion?.type ?? ''}`))
+
+        const rows: Array<Record<string, unknown>> = []
+        for (const c of candidates) {
+          const prose = proseMap.get(c.plant.species as string) ?? null
+          for (const type of ['watering', 'fertilizing'] as const) {
+            if (blocked.has(`${c.plant.id}-${type}`)) continue
+            const proposal = buildSeasonalProposal({
+              season,
+              type,
+              currentDays: type === 'watering'
+                ? c.plant.watering_interval_days
+                : c.plant.fertilizing_interval_days,
+              speciesName: c.plant.species as string,
+              seasonalCareText: prose,
+            })
+            if (proposal) {
+              rows.push({
+                plant_id: c.plant.id,
+                user_id: userId,
+                source: 'seasonal',
+                source_id: null,
+                action: proposal.action,
+                rationale: proposal.reason,
+                urgency: 'routine',
+                due_date: null,
+                interval_suggestion: proposal.intervalSuggestion,
+                status: 'proposed',
+              })
+            }
+          }
+        }
+
+        if (rows.length > 0) {
+          const { error: insErr } = await supabase.from('care_recommendations').insert(rows)
+          if (insErr) return
+        }
+        localStorage.setItem(SEASONAL_CHECK_KEY, monthKey)
+        if (rows.length > 0) router.refresh()
+      } catch {
+        // Soft-fail (offline / table missing) — the check retries next load.
+      }
+    }
+    void runSeasonalReview()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId])
 

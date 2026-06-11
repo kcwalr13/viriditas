@@ -4,6 +4,25 @@ All notable user-facing changes to Viriditas, newest first. The version number l
 `package.json` and is shown on the Me screen; versioning rules are in
 [CLAUDE.md → Versioning Convention](CLAUDE.md). Documentation-only changes don't bump the version.
 
+## 1.10.0 — 2026-06-11
+
+Camera Diagnose / Identify modes — the `/camera` mode pills (Snap · Diagnose · Identify)
+now all work. Client-only: no schema or Edge Function changes.
+
+- **Diagnose mode:** capture → pick the plant → "Examine {plant}" uploads the photo under
+  the diagnosis session-photo path (`{userId}/{plantId}/diagnosis/…`, no `photos` row —
+  transcript photos stay out of Timelapse) and hands off to the plant's Diagnose screen,
+  which opens an "Examine with AI" session with that photo as the opening turn. Any
+  resumable older session is abandoned, same as "Start fresh".
+- **Identify mode:** capture → `identify-species` (base64, nothing stored) → result sheet
+  with the species name, confidence, and the same confirm/correct stance as Add Plant:
+  **Confirm for {plant}** writes the species to an existing plant and marks it VERIFIED
+  (the Phase 5 owner-assertion rule), or **Add as new plant** opens the Add Plant wizard
+  with the name pre-filled (via the existing `?species=` mechanism). No match → honest
+  "No match" state with retake.
+- Mode pills are now buttons with an active state; the framing hint adapts per mode
+  ("Frame the problem area" / "Frame the whole plant"). Snap is unchanged.
+
 ## 1.9.0 — 2026-06-11
 
 Care reminders (web push) — Session D (Phase 4, the final phase) of

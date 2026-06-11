@@ -182,7 +182,8 @@ guide) and Explore.
 ## `identify-species`
 
 Lightweight species identification from a photo sent as base64 — no Storage involved, no
-database writes. Called from Explore photo search and Add Plant step 1.
+database writes. Called from Explore photo search, Add Plant step 1, and the Camera
+screen's Identify mode (v1.10.0).
 
 **Request**
 
@@ -311,6 +312,9 @@ migration is applied in production**).
   client then inserts `care_recommendations` proposals for the next steps + follow-up.
 - Up to the 4 most recent session photos are attached to the model call, fetched with
   magic-byte media-type detection (`_shared/images.ts`).
+- The opening photo can be pre-uploaded by the Camera screen's Diagnose mode (v1.10.0):
+  it uses the same `{userId}/{plantId}/diagnosis/…` path convention, so the existing
+  path guard applies unchanged — no contract change.
 
 ---
 

@@ -102,7 +102,7 @@ reviewable next steps that flow into the Today task list (Phase 1 of
 
 | Item | Status | Notes |
 |---|---|---|
-| Camera Diagnose / Identify modes | ⬜ | The mode pills on `/camera` are visual only — Snap works; Diagnose and Identify don't route anywhere yet. |
+| Camera Diagnose / Identify modes | ✅ v1.10.0 | All three pills work: Diagnose hands the capture to the plant's "Examine with AI" session as the opening photo; Identify runs `identify-species` with Add-Plant-style confirm/correct (verified on confirm, or `?species=` wizard pre-fill). Client-only — no schema/function changes. |
 | Cover photo designation + reordering | ⬜ | Cover photo is always the most recent upload. Individual photo *delete* exists (lightbox + strip); choosing/reordering does not. |
 | AI-assisted Diagnose | ✅ | Shipped v1.7.0 as full interactive sessions (`diagnose-plant`) — beyond the original "pass answers to analyze-plant" idea. The static tree remains as Quick triage. |
 | Lineage v2 — link child plants | ⬜ | `propagations.child_plant_id` is already nullable-ready; UI to link a propagation to a registered plant (and render a real graph) is unbuilt. |
@@ -168,6 +168,11 @@ Full detail: [CHANGELOG.md](CHANGELOG.md) per version, git log per commit.
   daily digest (max one push/user/day, silent on quiet days, deep-link to Today) of
   overdue care + due assistant tasks, sent via web-push/VAPID and authenticated with a
   dedicated `CRON_SECRET` header. The assistant spec is now fully implemented.
+- **2026-06-11 — Camera modes (v1.10.0).** The `/camera` Diagnose and Identify pills
+  wired (Snap was already live): Diagnose → capture becomes the opening photo of an
+  "Examine with AI" session; Identify → `identify-species` with the Add Plant
+  confirm/correct affordance (verified species on confirm, or wizard pre-fill).
+  Client-only session.
 
 ### Key decisions log
 

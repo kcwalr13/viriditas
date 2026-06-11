@@ -31,6 +31,11 @@ import type {
   Plant, DiagnosisSession, DiagnosisTurn, DiagnosisVerdict, DiagnoseReply,
 } from '@/lib/types'
 
+// sessionStorage key written by /camera's Diagnose mode (v1.10.0): a
+// pre-uploaded opening photo as { plantId, photoPath }. Consumed (and removed)
+// once on load. Must match the constant in app/(app)/camera/page.tsx.
+const CAMERA_DIAGNOSE_HANDOFF_KEY = 'viriditas.cameraDiagnoseHandoff'
+
 // ── Static question tree (Quick triage) ───────────────────────────────────
 
 interface Option {
@@ -379,6 +384,37 @@ export default function DiagnosePage() {
 
   useEffect(() => { load() }, [load])
 
+  // Camera handoff (v1.10.0): /camera's Diagnose mode uploads an opening photo
+  // under the session-photo path convention, stashes { plantId, photoPath } in
+  // sessionStorage, and routes here. Consume it once, after load() has settled
+  // (so stale active sessions are already abandoned and any resumable one is
+  // known), and open a fresh examination with that photo as the opening turn.
+  const handoffConsumedRef = useRef(false)
+  useEffect(() => {
+    if (loading || handoffConsumedRef.current) return
+    const raw = sessionStorage.getItem(CAMERA_DIAGNOSE_HANDOFF_KEY)
+    if (!raw) return
+    handoffConsumedRef.current = true
+    sessionStorage.removeItem(CAMERA_DIAGNOSE_HANDOFF_KEY)
+    try {
+      const handoff = JSON.parse(raw) as { plantId?: string; photoPath?: string }
+      if (handoff.plantId !== id || !handoff.photoPath) return
+      // The user just chose to examine a fresh photo — same intent as
+      // "Start fresh", so an existing resumable session is abandoned.
+      if (resumable) {
+        void supabase.from('diagnosis_sessions')
+          .update({ status: 'abandoned' })
+          .eq('id', resumable.id)
+        setResumable(null)
+      }
+      resetSessionState()
+      setMode('session')
+      void sendTurn(null, null, { fresh: true, photoPath: handoff.photoPath })
+    } catch {
+      // Malformed handoff — ignore; the normal Diagnose home renders.
+    }
+  }, [loading]) // eslint-disable-line react-hooks/exhaustive-deps
+
   function getPhotoUrl(path: string): string {
     return supabase.storage.from('plant-photos').getPublicUrl(path).data.publicUrl
   }
@@ -407,7 +443,11 @@ export default function DiagnosePage() {
   // alongside a successful reply). `fresh: true` forces a brand-new session
   // regardless of lingering state — beginExamination uses it because React
   // state resets in the same tick wouldn't be visible to this closure yet.
-  async function sendTurn(text: string | null, photo: File | null, opts?: { fresh?: boolean }) {
+  async function sendTurn(
+    text: string | null,
+    photo: File | null,
+    opts?: { fresh?: boolean; photoPath?: string }
+  ) {
     if (examining) return
     const activeSessionId = opts?.fresh ? null : sessionId
     const baseTurns: DiagnosisTurn[] = opts?.fresh ? [] : turns
@@ -415,8 +455,10 @@ export default function DiagnosePage() {
     setSessionError(null)
     const prevTurns = baseTurns
     try {
-      let photoPath: string | null = null
-      if (photo) {
+      // opts.photoPath = a photo already in storage under the session-photo
+      // convention (the /camera Diagnose handoff) — skip the upload.
+      let photoPath: string | null = opts?.photoPath ?? null
+      if (!photoPath && photo) {
         photoPath = await uploadSessionPhoto(photo, activeSessionId)
         if (!photoPath) throw new Error('Photo upload failed — please try again.')
       }

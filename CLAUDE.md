@@ -57,7 +57,7 @@ viriditas/
       add-plant/
         page.tsx             # Add Plant — 3-step wizard (identify → place → schedule)
       camera/
-        page.tsx             # Camera capture + confirm sheet (FAB target; full-screen, nav hidden)
+        page.tsx             # Camera capture (FAB target; full-screen, nav hidden) — Snap / Diagnose / Identify modes (v1.10.0)
       plant/
         [id]/
           page.tsx           # Plant Detail — Client Component; single-scroll editorial layout
@@ -142,7 +142,7 @@ viriditas/
 - [x] `supabase/functions/identify-species` — species from base64 photo (no storage)
 - [x] `supabase/functions/suggest-species` — 4-6 candidates for a freeform query
 - [x] `species_profiles` table — includes `pruning_tips`, `disease_symptoms`, `seasonal_care`; prompts request bullet-formatted content
-- [x] `app/(app)/camera/page.tsx` — Camera capture + confirm sheet; best-guess plant pre-selection (localStorage → first plant); uploads to `plant-photos` storage + `photos` table; saves `viriditas.lastCameraPlant` to localStorage for next session
+- [x] `app/(app)/camera/page.tsx` — Camera capture with three modes (pills wired in v1.10.0): **Snap** (confirm sheet → `plant-photos` storage + `photos` table → plant detail), **Diagnose** (upload under `{userId}/{plantId}/diagnosis/…` with no `photos` row → sessionStorage handoff `viriditas.cameraDiagnoseHandoff` → Diagnose screen auto-opens an AI examination with the photo), **Identify** (`identify-species` from base64, no storage → confirm-for-existing-plant sets `species` + `is_name_verified`, or Add-as-new-plant via `/add-plant?species=`). Best-guess plant pre-selection (localStorage → first plant); saves `viriditas.lastCameraPlant` for next session
 - [x] `app/(app)/plant/[id]/timelapse/page.tsx` — Growth filmstrip: loads all photos oldest-first, scrubber + play/pause, tap filmstrip thumbnail to jump to frame
 - [x] `app/(app)/plant/[id]/diagnose/page.tsx` — Branching diagnostic flow (11 verdicts, 3 question levels max); saves to `diagnoses` table (graceful-fail if migration not run); checklist with tap-to-complete next steps
 - [x] `app/(app)/plant/[id]/lineage/page.tsx` — Propagation graph; full CRUD for `propagations` table (graceful-fail if migration not run); log a cutting form with recipient, date, status, note
@@ -502,6 +502,7 @@ create policy "Users manage own propagations" on propagations
 ```
 
 - **Camera best-guess logic**: `viriditas.lastCameraPlant` localStorage key stores the last plant used in the camera confirm flow; used as the first-choice pre-selection on next open
+- **Camera modes (v1.10.0)**: the Snap/Diagnose/Identify pills select what a capture does. Diagnose uploads the photo as a session opener (the diagnose page consumes the `viriditas.cameraDiagnoseHandoff` sessionStorage key once on load and calls `sendTurn` with `opts.photoPath`, skipping its own upload); Identify never stores the photo. Both reuse existing Edge Function contracts — no server changes
 - **Timelapse data source**: reads from the existing `photos` table ordered `created_at ASC` (oldest first) — no new table needed
 - **Diagnose, two paths (v1.7.0)**: "Examine with AI" runs bounded `diagnose-plant` sessions (transcript UI, ≤3 ask-turns, verdict → `diagnoses` + `care_recommendations` proposals; resume window 24h). "Quick triage" keeps the original static tree: 11 verdicts, ≤3 question levels, no AI call, saves to `diagnoses` silently (errors swallowed). The landing view lists past examinations from `diagnoses` (AI vs Triage tagged via `verdict_id`)
 - **Lineage v1**: recipient is free-text; no cross-account linking; `child_plant_id` nullable for forward compatibility with v2
@@ -531,3 +532,4 @@ When a version bumps, also add a matching entry to `CHANGELOG.md` (the human-fac
 - `1.7.0` — AI care assistant Session B (Phase 2, the flagship): interactive diagnosis sessions. New `diagnosis_sessions` table + `diagnose-plant` Edge Function (`claude-sonnet-4-6`): server-assembled context, ≤3 server-tracked ask-turns, honest Low-confidence verdicts with differentials, verdict → `diagnoses` history + `care_recommendations` proposals (incl. scheduled follow-up). Diagnose screen rework: "Examine with AI" transcript UI, Quick triage retained, Past examinations list, 24h resume/abandon. Plant-context prompt builders extracted to `supabase/functions/_shared/` (analyze-plant redeploy required).
 - `1.8.0` — AI care assistant Session C (Phase 3 + rest of Phase 5): seasonal schedule review (`lib/seasonal.ts` heuristics, monthly localStorage gate, per-season dedupe, Phase 1 confirm flow); toxicity caution caption on Plant Detail + Explore; Gemini retirement (`analyze-plant` + `fetch-species-info` Claude-only, `AI_PROVIDER`/`GEMINI_API_KEY` secrets droppable, both functions need redeploy); species fact flagging (`species_profile_flags` table, Report-an-issue sheet on species guides, Me → Flagged facts review list).
 - `1.9.0` — AI care assistant Session D (Phase 4, the final phase): care reminders via web push. `push_subscriptions` table + Me → Care reminders per-device opt-in/revoke (iOS A2HS caveat in the copy); `public/sw.js` service worker (push + click only); `lib/notifications.ts` stub → real helpers; `send-care-push` Edge Function (no AI; `x-cron-secret` auth, service role) sends one digest/user/day of overdue care + due assistant tasks, silent on quiet days, deep-link to Today, self-pruning subscriptions; scheduled by pg_cron + pg_net at 13:00 UTC (manual SQL in SETUP.md). Manual steps: migration, VAPID keys + `CRON_SECRET` secrets, `NEXT_PUBLIC_VAPID_PUBLIC_KEY` env (local + Vercel), function deploy, cron schedule.
+- `1.10.0` — Camera Diagnose/Identify modes (roadmap item; client-only). The `/camera` mode pills work: Diagnose uploads the capture as a diagnosis-session opener (session-photo path convention, no `photos` row) and hands off via sessionStorage to the Diagnose screen's "Examine with AI" flow; Identify calls `identify-species` (base64, no storage) and offers Confirm-for-existing-plant (sets `species` + `is_name_verified`) or Add-as-new-plant (`/add-plant?species=` pre-fill). No schema or Edge Function changes.

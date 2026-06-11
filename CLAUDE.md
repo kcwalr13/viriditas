@@ -29,7 +29,7 @@ Kyle is a beginner developer who relies on Claude to write most of the code. Alw
 | Auth | Supabase Auth via `@supabase/ssr` (cookie-based, SSR-safe) |
 | Database | Supabase (PostgreSQL) |
 | File/Photo Storage | Supabase Storage |
-| AI Integration | Supabase Edge Functions → Claude API (`claude-haiku-4-5-20251001`; Gemini supported on `analyze-plant`/`fetch-species-info` via `AI_PROVIDER` secret) |
+| AI Integration | Supabase Edge Functions → Claude API (`claude-haiku-4-5-20251001`; `diagnose-plant` uses `claude-sonnet-4-6`; Gemini supported on `analyze-plant`/`fetch-species-info` via `AI_PROVIDER` secret) |
 | Deployment | Vercel (auto-deploys on every push to main) |
 
 **Language:** TypeScript throughout. No `any` types.
@@ -62,7 +62,7 @@ viriditas/
         [id]/
           page.tsx           # Plant Detail — Client Component; single-scroll editorial layout
           timelapse/page.tsx # Growth filmstrip — scrubber, play/pause, filmstrip thumbnails
-          diagnose/page.tsx  # Branching diagnostic flow — 11 static verdicts, saves to diagnoses
+          diagnose/page.tsx  # Examine with AI (bounded diagnose-plant sessions) + Quick triage (static tree) + history
           lineage/page.tsx   # Propagation graph — CRUD on propagations table
       explore/
         page.tsx             # Explore/Field Guide — category grid, featured carousel, search, species detail
@@ -85,7 +85,11 @@ viriditas/
     notifications.ts        # Stub — web push not supported; no-op exports
   supabase/
     functions/
-      analyze-plant/         index.ts   # Edge Function: AI plant analysis
+      _shared/
+        plant-context.ts     # Shared context-section builders + types (analyze-plant + diagnose-plant)
+        images.ts            # Shared image fetch with magic-byte media-type detection
+      analyze-plant/         index.ts   # Edge Function: AI plant analysis (Haiku)
+      diagnose-plant/        index.ts   # Edge Function: interactive diagnosis sessions (Sonnet, ≤3 ask-turns)
       fetch-species-info/    index.ts   # Edge Function: AI species profile
       identify-species/      index.ts   # Edge Function: species from base64 photo (no storage)
       suggest-species/       index.ts   # Edge Function: 4-6 candidate species for a query
@@ -95,7 +99,7 @@ viriditas/
     SETUP.md                # Zero-to-running guide (Supabase project, secrets, deploys, Vercel)
     ARCHITECTURE.md         # Auth/session model, two-layer plant profile, AI pipeline
     DATABASE.md             # Schema reference — tables, columns, constraints, RLS, migrations
-    EDGE-FUNCTIONS.md       # API reference for the four Edge Functions
+    EDGE-FUNCTIONS.md       # API reference for the five Edge Functions
   public/
     icon.png                # App icon (PWA)
     icon-192.png            # 192×192 PWA icon
@@ -141,6 +145,7 @@ viriditas/
 - [x] Plant Detail `§ 08 · Tools` strip — three ToolTile cards linking to Time-lapse, Diagnose, and Lineage sub-screens
 - [x] **AI care assistant Phase 1 (v1.6.0)** — `analyze-plant` v2 emits 0–3 structured `actions` + optional `interval_suggestion`; client persists them to `care_recommendations` (graceful-fail if migration not run); Today gains an "Assistant — proposed" section with Accept/Done/Dismiss (+ dismiss-reason sheet), accepted tasks join the task list, interval changes apply only via a confirm sheet; Plant Detail renders the same rows in the AI diagnosis card; proposals expire after 14 days
 - [x] **Species identity verification (v1.6.0, Phase 5 P0 slice)** — dossier Confirm chip / VERIFIED tag, manual species edits set `is_name_verified`, Add Plant saves confirmed/typed species as verified, `analyze-plant` gets an identity-verified context line
+- [x] **Interactive AI diagnosis (v1.7.0, Phase 2)** — `diagnose-plant` Edge Function (`claude-sonnet-4-6`, Claude-only): server-assembled context + session transcript + photos; replies with exactly one of question / photo_request / verdict; ≤3 server-tracked ask-turns then a forced verdict; honest Low-confidence verdicts with differential + safe steps; verdicts write `diagnoses` (verdict_id `'ai-session'`) and the client inserts `care_recommendations` proposals (next steps + follow-up). Diagnose screen: "Examine with AI" session UI (field-notes styling), Quick triage (static tree) retained, Past examinations history, 24h resume/abandon. Context builders extracted to `supabase/functions/_shared/`
 
 ## What Comes Next
 See `ROADMAP.md` for the current state, known gaps, priorities, and development history.
@@ -275,6 +280,13 @@ Floating pill with four tabs: **Today / Plants / Explore / Me**, plus an accent-
 - id, user_id, parent_plant_id, child_plant_id (nullable), recipient_name (nullable)
 - taken_on (date), status (CHECK: rooting/thriving/failed/unknown, default rooting), note (nullable)
 
+`diagnosis_sessions` *(v1.7.0 — assistant Phase 2; full SQL in `docs/DATABASE.md`; **applied in production 2026-06-10** — verified: 10 columns, RLS on, 1 policy)*
+- id, plant_id, user_id, created_at, concluded_at (nullable)
+- status (CHECK: active/concluded/abandoned), turns (jsonb transcript array), ask_count (int, server-tracked, cap 3)
+- verdict (jsonb, nullable), diagnosis_id (nullable → diagnoses.id once concluded)
+- All writes happen in the `diagnose-plant` function (service role); the client only reads (resume offer) and flips status to `abandoned`
+- Session photos live under `{userId}/{plantId}/diagnosis/…` in storage with **no `photos` row**
+
 `care_recommendations` *(v1.6.0 — assistant Phase 1; full SQL in `docs/DATABASE.md`; **applied in production 2026-06-10** — verified: 14 columns, RLS on, 1 policy)*
 - id, plant_id, user_id, created_at, resolved_at (nullable)
 - source (CHECK: analysis/diagnosis/seasonal), source_id (uuid, nullable — the analysis row)
@@ -335,8 +347,9 @@ ALTER TABLE care_logs ADD CONSTRAINT care_logs_type_check CHECK (type IN (...all
 - Always get the session first: `const { data: { session } } = await supabase.auth.getSession()`
 - Pass the token explicitly: `headers: { Authorization: \`Bearer ${session.access_token}\` }`
 - This is required because `supabase.functions.invoke` doesn't always inject the token reliably
-- Edge Functions are deployed with `--no-verify-jwt` flag; **all four validate the token themselves** by calling `supabase.auth.getUser()` with the forwarded Authorization header and returning 401 when it's missing or invalid (hardened in v1.5.0)
+- Edge Functions are deployed with `--no-verify-jwt` flag; **all five validate the token themselves** by calling `supabase.auth.getUser()` with the forwarded Authorization header and returning 401 when it's missing or invalid (hardened in v1.5.0)
 - Additional v1.5.0 hardening: `analyze-plant` rejects any `imageUrl` outside this project's `plant-photos` storage bucket (SSRF guard); `fetch-species-info` maps AI output field-by-field onto the schema instead of spreading untrusted JSON into the upsert; `identify-species` enforces a MIME allowlist (jpeg/png/webp/gif)
+- v1.7.0: `diagnose-plant` accepts session-photo paths only under the caller's own `{userId}/{plantId}/diagnosis/` prefix (the SSRF guard adapted to storage paths) and performs all session writes with the service role
 - Full request/response shapes, error codes, and deploy commands: see `docs/EDGE-FUNCTIONS.md`
 
 ### Photo Uploads
@@ -349,7 +362,7 @@ ALTER TABLE care_logs ADD CONSTRAINT care_logs_type_check CHECK (type IN (...all
 ### Image Format Detection in Edge Functions
 - Never trust the `Content-Type` header from Supabase Storage — detect from magic bytes
 - WebP: `RIFF....WEBP` (bytes 0–3 and 8–11), PNG: `\x89PNG`, GIF: `GIF8`, JPEG: `\xFF\xD8\xFF`
-- See `fetchImageAsBase64` in `supabase/functions/analyze-plant/index.ts`
+- See `fetchImageAsBase64` in `supabase/functions/_shared/images.ts` (extracted from analyze-plant in v1.7.0; both analyze-plant and diagnose-plant use it)
 
 ### AI Provider
 - Controlled by the `AI_PROVIDER` Supabase secret (`claude` or `gemini`)
@@ -473,7 +486,7 @@ create policy "Users manage own propagations" on propagations
 
 - **Camera best-guess logic**: `viriditas.lastCameraPlant` localStorage key stores the last plant used in the camera confirm flow; used as the first-choice pre-selection on next open
 - **Timelapse data source**: reads from the existing `photos` table ordered `created_at ASC` (oldest first) — no new table needed
-- **Diagnose verdicts**: 11 verdicts defined statically in the component (no AI call); question tree is ≤3 levels deep; saves to `diagnoses` table silently (errors swallowed)
+- **Diagnose, two paths (v1.7.0)**: "Examine with AI" runs bounded `diagnose-plant` sessions (transcript UI, ≤3 ask-turns, verdict → `diagnoses` + `care_recommendations` proposals; resume window 24h). "Quick triage" keeps the original static tree: 11 verdicts, ≤3 question levels, no AI call, saves to `diagnoses` silently (errors swallowed). The landing view lists past examinations from `diagnoses` (AI vs Triage tagged via `verdict_id`)
 - **Lineage v1**: recipient is free-text; no cross-account linking; `child_plant_id` nullable for forward compatibility with v2
 
 ## Versioning Convention
@@ -498,3 +511,4 @@ When a version bumps, also add a matching entry to `CHANGELOG.md` (the human-fac
 - `1.5.1` — Fixed the remaining Today hydration error (#418): masthead date/season, greeting, streak-since text, activity grid, and journal-peek relative time were all computed from `new Date()` in the render body, so Vercel's UTC server render diverged from the browser's local-time render after 8 PM Eastern. `TodayClient` now keeps a `now: Date | null` state set in a mount effect; time-derived strings render deterministic fallbacks until it's set. Pattern note: never call `new Date()` (or read the clock any other way) in the render body of a client component that gets server-rendered.
 - `1.5.2` — Plants list view: quick-log buttons now render on every row (the last Info item from the June 2026 review). Water is always loggable; feed shows whenever a fertilizing schedule exists; urgency is expressed by button color (solid danger/warn when due, quiet outline otherwise) instead of by the button appearing and disappearing.
 - `1.6.0` — AI care assistant Session A (`docs/ASSISTANT-SPEC.md` Phase 1 + Phase 5 identity slice): `care_recommendations` table + `analyze-plant` v2 (structured actions, interval suggestions, identity context, current-schedule context); Today "Assistant — proposed" section with Accept/Done/Dismiss and dismiss-reason sheet; accepted tasks join the task list; interval confirm sheet; Plant Detail inline action rows; 14-day proposal expiry; species identity verification (dossier Confirm chip/VERIFIED tag, verified manual edits, Add Plant verified saves).
+- `1.7.0` — AI care assistant Session B (Phase 2, the flagship): interactive diagnosis sessions. New `diagnosis_sessions` table + `diagnose-plant` Edge Function (`claude-sonnet-4-6`): server-assembled context, ≤3 server-tracked ask-turns, honest Low-confidence verdicts with differentials, verdict → `diagnoses` history + `care_recommendations` proposals (incl. scheduled follow-up). Diagnose screen rework: "Examine with AI" transcript UI, Quick triage retained, Past examinations list, 24h resume/abandon. Plant-context prompt builders extracted to `supabase/functions/_shared/` (analyze-plant redeploy required).

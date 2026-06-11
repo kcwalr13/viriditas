@@ -19,66 +19,23 @@
 // schedule change or is null. Both are sanitized server-side before returning.
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
-import { encode as encodeBase64 } from 'https://deno.land/std@0.168.0/encoding/base64.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+// Context types + section builders shared with diagnose-plant (Phase 2
+// extraction). Supabase bundles `_shared/` into each function on deploy.
+import {
+  buildContextSections,
+  type PreviousAnalysis,
+  type CareLogEntry,
+  type SpeciesProfileContext,
+  type PlantContext,
+  type SeasonContext,
+  type IdentityContext,
+} from '../_shared/plant-context.ts'
+import { fetchImageAsBase64, type ImageMediaType } from '../_shared/images.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
-
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-type PreviousAnalysis = {
-  date: string
-  species: string | null
-  health: string | null
-  health_score: number | null   // Gap 5 — lets AI reference trend
-  care: string | null            // Gap 3 — lets AI reflect on prior recommendations
-}
-
-type CareLogEntry = {
-  type: string
-  notes: string | null
-  date: string
-  category?: 'growth' | 'pest' | 'environment' | 'concern' | 'general' | null   // Gap 4
-  measurement_value?: number | null   // Gap 6
-  measurement_unit?: string | null    // Gap 6
-}
-
-type SpeciesProfileContext = {
-  scientific_name?: string | null
-  light?: string | null
-  watering?: string | null
-  humidity?: string | null
-  temperature?: string | null
-  common_problems?: string | null
-  pruning_tips?: string | null       // Gap 1
-  disease_symptoms?: string | null   // Gap 1
-  seasonal_care?: string | null      // Gap 1
-  [key: string]: string | null | undefined
-}
-
-type PlantContext = {
-  location?: string | null
-  pot_size?: string | null
-  soil_type?: string | null             // e.g. "aroid mix" — affects watering frequency advice (Phase 12C)
-  plant_notes?: string | null           // Gap 2 — freeform owner notes from plants.notes
-  pest_notes?: string | null            // Gap 2 — pest history from plants.pest_notes
-  last_treatment_date?: string | null   // Gap 2 — YYYY-MM-DD
-  watering_interval_days?: number | null     // Phase 1 — current schedule, baseline for interval_suggestion
-  fertilizing_interval_days?: number | null  // Phase 1
-}
-
-type SeasonContext = {
-  month: number                          // 1–12
-  hemisphere: 'northern' | 'southern'   // northern by default
-}
-
-// Phase 5 identity slice: lets the model hedge species-specific claims when
-// the species name is AI-assumed rather than owner-confirmed.
-type IdentityContext = {
-  verified: boolean
 }
 
 // ── v2 structured output (Phase 1) ───────────────────────────────────────────
@@ -110,90 +67,12 @@ function buildPrompt(
   identityContext: IdentityContext | null
 ): string {
   const hasHistory = previousAnalyses.length > 0
-  const hasCare    = recentCareLogs.length > 0
 
-  const speciesSection = speciesProfile
-    ? `\nSpecies reference data (use this to assess whether the plant's conditions match its known requirements):
-- Scientific name: ${speciesProfile.scientific_name ?? 'unknown'}
-- Light needs: ${speciesProfile.light ?? 'unknown'}
-- Watering: ${speciesProfile.watering ?? 'unknown'}
-- Humidity: ${speciesProfile.humidity ?? 'unknown'}
-- Temperature: ${speciesProfile.temperature ?? 'unknown'}
-- Common problems: ${speciesProfile.common_problems ?? 'unknown'}
-- Disease & pest symptoms to watch for: ${speciesProfile.disease_symptoms ?? 'unknown'}
-- Pruning guidance: ${speciesProfile.pruning_tips ?? 'unknown'}
-- Seasonal care notes: ${speciesProfile.seasonal_care ?? 'unknown'}`
-    : ''
-
-  const contextParts: string[] = []
-  if (plantContext?.location)            contextParts.push(`- Location: ${plantContext.location}`)
-  if (plantContext?.pot_size)            contextParts.push(`- Pot size: ${plantContext.pot_size}`)
-  if (plantContext?.soil_type)           contextParts.push(`- Soil type: ${plantContext.soil_type}`)
-  if (plantContext?.plant_notes)         contextParts.push(`- Owner's notes on this plant: ${plantContext.plant_notes}`)
-  if (plantContext?.pest_notes)          contextParts.push(`- Pest history: ${plantContext.pest_notes}`)
-  if (plantContext?.last_treatment_date) contextParts.push(`- Most recent pest treatment: ${plantContext.last_treatment_date}`)
-  // Current schedules — the baseline any interval_suggestion must be judged
-  // against. Gated on the KEY being present, not just on plantContext: v1.5.x
-  // clients send plantContext without the interval keys, and asserting
-  // "none set" for them would be inventing a claim. The v2 client always
-  // sends both keys (explicit null = genuinely no schedule).
-  if (plantContext && plantContext.watering_interval_days !== undefined) {
-    contextParts.push(`- Current watering schedule: ${plantContext.watering_interval_days ? `every ${plantContext.watering_interval_days} days` : 'none set'}`)
-  }
-  if (plantContext && plantContext.fertilizing_interval_days !== undefined) {
-    contextParts.push(`- Current fertilizing schedule: ${plantContext.fertilizing_interval_days ? `every ${plantContext.fertilizing_interval_days} days` : 'none set'}`)
-  }
-  const plantContextSection = contextParts.length > 0
-    ? `\nPlant context:\n${contextParts.join('\n')}\nFactor this into your recommendations — reference the specific conditions of their location, let soil type inform watering frequency advice, and take pest history seriously when interpreting what you see in the photo.`
-    : ''
-
-  // Seasonal context: lets the AI give season-appropriate advice and flag
-  // when winter dormancy should prompt interval adjustments.
-  let seasonSection = ''
-  if (seasonContext) {
-    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-    const monthName  = monthNames[seasonContext.month - 1]
-    const isWinter   = seasonContext.hemisphere === 'northern'
-      ? [11, 12, 1, 2].includes(seasonContext.month)
-      : [5, 6, 7, 8].includes(seasonContext.month)
-    seasonSection = `\nSeasonal context: ${monthName} (${seasonContext.hemisphere} hemisphere).${
-      isWinter
-        ? ' It is currently winter — most houseplants have slower growth and need less frequent watering. Mention this if it is relevant to the plant\'s care.'
-        : ''
-    }`
-  }
-
-  const historySection = hasHistory
-    ? `\nPrevious analysis history (most recent first):
-${previousAnalyses.map(a => {
-  const score = a.health_score !== null ? ` Score: ${a.health_score}/5.` : ''
-  const care  = a.care ? ` Previous recommendations: ${a.care}` : ''
-  return `[${a.date}] Species: ${a.species ?? 'unknown'}. Health: ${a.health ?? 'not recorded'}.${score}${care}`
-}).join('\n')}
-Compare what you observe now against this history. If scores are trending up, affirm the progress; if trending down, flag it and adjust recommendations accordingly. Where a previous analysis made specific recommendations, use the recent care log below as evidence of whether the owner followed them — and comment on whether those actions appear to have helped.`
-    : ''
-
-  const careSection = hasCare
-    ? `\nRecent care log:
-${recentCareLogs.map(l => {
-  let line = `[${l.date}] ${l.type}`
-  if (l.type === 'note' && l.category) line += ` (${l.category})`
-  if (l.type === 'measured' && l.measurement_value !== null && l.measurement_value !== undefined) {
-    line += ` — ${l.measurement_value}${l.measurement_unit ? ' ' + l.measurement_unit : ''}`
-  }
-  if (l.notes) line += `: ${l.notes}`
-  return line
-}).join('\n')}
-Factor this care history into your assessment. If the plant was recently watered, don't recommend watering unless there's a clear need. Treat 'note' entries as first-person owner observations — the category tag in parentheses indicates what the owner was focused on (growth, pest, environment, concern, general). Treat 'measured' entries as objective trend data: compare successive values to assess growth rate and flag stagnation or acceleration.`
-    : ''
-
-  // Phase 5 identity slice: one line telling the model how much weight the
-  // species name can bear. Only rendered when the caller sent the context.
-  const identitySection = identityContext
-    ? identityContext.verified
-      ? `\nSpecies identity: the owner has verified the species name — treat the species reference data as reliable.`
-      : `\nSpecies identity: the species name is AI-assumed and has NOT been confirmed by the owner. Hedge species-specific claims accordingly, and say so if what you see in the photo seems inconsistent with the assumed species.`
-    : ''
+  // The shared context block (identity → species → plant context → season →
+  // history → care log) — identical to what diagnose-plant feeds its model.
+  const contextBlock = buildContextSections(
+    previousAnalyses, recentCareLogs, speciesProfile, plantContext, seasonContext, identityContext
+  )
 
   const healthInstruction = hasHistory
     ? 'Reference previous observations to describe whether the plant is improving, stable, or declining.'
@@ -224,7 +103,7 @@ Rules for "actions" (structured next steps — these become tasks in the owner's
 Rules for "interval_suggestion" (a proposed schedule change):
 - Include it ONLY when the evidence clearly supports changing the watering or fertilizing schedule (seasonal dormancy, repeated overwatering signs, growth-rate change). Otherwise set it to null.
 - "type" is "watering" or "fertilizing"; "current_days" is the current schedule from the plant context (null if none); "suggested_days" is your proposed interval.
-Only respond with the JSON object. No extra text.${identitySection}${speciesSection}${plantContextSection}${seasonSection}${historySection}${careSection}`
+Only respond with the JSON object. No extra text.${contextBlock}`
 }
 
 // ── v2 output sanitizers ──────────────────────────────────────────────────────
@@ -274,19 +153,6 @@ function sanitizeIntervalSuggestion(raw: unknown): IntervalSuggestion | null {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-type ImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp'
-
-function detectMediaType(bytes: Uint8Array): ImageMediaType {
-  if (
-    bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
-    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
-  ) return 'image/webp'
-  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) return 'image/png'
-  if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) return 'image/gif'
-  if (bytes[0] === 0xFF && bytes[1] === 0xD8 && bytes[2] === 0xFF) return 'image/jpeg'
-  return 'image/jpeg'
-}
-
 // SSRF guard: the function fetches imageUrl server-side, so a malicious caller
 // could otherwise point it at internal services or arbitrary hosts. Only URLs
 // on this project's own Supabase Storage (plant-photos bucket) are allowed.
@@ -302,17 +168,6 @@ function isAllowedImageUrl(imageUrl: string): boolean {
   } catch {
     return false
   }
-}
-
-async function fetchImageAsBase64(imageUrl: string): Promise<{ base64: string; mediaType: ImageMediaType }> {
-  const response = await fetch(imageUrl)
-  if (!response.ok) throw new Error(`Failed to fetch image (${response.status}): ${imageUrl}`)
-  const arrayBuffer = await response.arrayBuffer()
-  const bytes = new Uint8Array(arrayBuffer)
-  const base64 = encodeBase64(arrayBuffer)
-  const mediaType = detectMediaType(bytes)
-  console.log(`Fetched image — detected media type: ${mediaType}`)
-  return { base64, mediaType }
 }
 
 // ── Claude ────────────────────────────────────────────────────────────────────

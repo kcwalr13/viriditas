@@ -726,13 +726,29 @@ export default function PlantDetailPage() {
 
     // Remove storage files before deleting the plant row (cascade removes the photos
     // table rows but leaves the actual files in Supabase Storage as orphans).
+    // list() is NOT recursive: diagnosis session photos (v1.7.0) live two
+    // levels deeper at {plantId}/diagnosis/{sessionFolder}/ and must be
+    // collected explicitly or they'd be orphaned.
     const { data: { user } } = await supabase.auth.getUser()
     if (user) {
-      const { data: files } = await supabase.storage
-        .from('plant-photos')
-        .list(`${user.id}/${id}`)
-      if (files && files.length > 0) {
-        const paths = files.map(f => `${user.id}/${id}/${f.name}`)
+      const base = `${user.id}/${id}`
+      const paths: string[] = []
+      const { data: files } = await supabase.storage.from('plant-photos').list(base)
+      for (const f of files ?? []) {
+        // Folder entries (e.g. "diagnosis") have a null id; remove() on a
+        // folder path is a no-op, so only collect real files here.
+        if (f.id) paths.push(`${base}/${f.name}`)
+      }
+      const { data: sessionFolders } = await supabase.storage
+        .from('plant-photos').list(`${base}/diagnosis`)
+      for (const folder of sessionFolders ?? []) {
+        const { data: sessionFiles } = await supabase.storage
+          .from('plant-photos').list(`${base}/diagnosis/${folder.name}`)
+        for (const f of sessionFiles ?? []) {
+          if (f.id) paths.push(`${base}/diagnosis/${folder.name}/${f.name}`)
+        }
+      }
+      if (paths.length > 0) {
         await supabase.storage.from('plant-photos').remove(paths)
       }
     }

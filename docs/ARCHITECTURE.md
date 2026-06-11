@@ -89,16 +89,20 @@ entered) or the latest `analysis_results.species` (AI-identified). Always resolv
 | Species profile | `fetch-species-info` → cache hit returns instantly; miss generates + upserts with the service role |
 | Photo ID | Explore / Add Plant send base64 → `identify-species` → name + confidence only |
 | Name search | Explore → `suggest-species` → 4–6 candidates → browser adds Wikipedia thumbnails client-side |
+| Diagnosis session (v1.7.0) | Diagnose screen → `diagnose-plant` assembles context **server-side** (plant row, species profile, logs, analyses, prior diagnoses) + transcript + session photos → one of question / photo_request / verdict; ≤3 ask-turns, then a forced verdict → `diagnoses` row + client-inserted `care_recommendations` proposals |
 
 Full contracts: [EDGE-FUNCTIONS.md](EDGE-FUNCTIONS.md).
 
 **Provider switch:** the `AI_PROVIDER` secret (`claude`/`gemini`) selects the model in
-`analyze-plant` and `fetch-species-info`; the other two are Claude-only. Changing it
+`analyze-plant` and `fetch-species-info`; the other three are Claude-only
+(`diagnose-plant` deliberately so — see docs/ASSISTANT-SPEC.md). Changing it
 requires redeploying the functions.
 
-**Security model (since v1.5.0):** all four functions are deployed `--no-verify-jwt` but
+**Security model (since v1.5.0):** all five functions are deployed `--no-verify-jwt` but
 authenticate every call via `getUser()`; `analyze-plant` only fetches images from this
 project's `plant-photos` bucket (SSRF guard) and detects media type from magic bytes;
+`diagnose-plant` only accepts session-photo paths under the caller's own
+`{userId}/{plantId}/diagnosis/` prefix and writes sessions with the service role;
 `fetch-species-info` whitelists AI output fields before writing the shared cache;
 `identify-species` enforces a MIME allowlist.
 

@@ -117,13 +117,52 @@ create policy "Users manage own diagnoses" on diagnoses
   for all using (auth.uid() = user_id);
 ```
 
+### `diagnosis_sessions` *(v1.7.0 — Phase 2 of docs/ASSISTANT-SPEC.md; **applied in production 2026-06-10** — verified: 10 columns, RLS on, 1 policy)*
+
+One row per interactive AI examination. **All writes happen in the `diagnose-plant`
+Edge Function with the service role** (transcript and ask-count integrity stay out of
+client hands) — except status flips to `abandoned`, which the client performs when the
+user starts fresh or a session ages past 24h. The client reads sessions to offer
+"Resume examination". Full DDL:
+
+```sql
+create table if not exists diagnosis_sessions (
+  id uuid primary key default gen_random_uuid(),
+  plant_id uuid not null references plants(id) on delete cascade,
+  user_id uuid not null references auth.users(id),
+  status text not null check (status in ('active','concluded','abandoned')) default 'active',
+  turns jsonb not null default '[]'::jsonb,
+  ask_count int not null default 0,
+  verdict jsonb,
+  diagnosis_id uuid references diagnoses(id),
+  created_at timestamptz not null default now(),
+  concluded_at timestamptz
+);
+create index if not exists idx_diag_sessions_plant on diagnosis_sessions(plant_id, created_at desc);
+alter table diagnosis_sessions enable row level security;
+create policy "Users manage own diagnosis_sessions" on diagnosis_sessions
+  for all using (auth.uid() = user_id);
+```
+
+Column notes:
+- `turns` — the transcript, an array of
+  `{ role: 'user'|'assistant', type: 'opening'|'photo'|'answer'|'question'|'photo_request'|'verdict', text?, photo_path?, options?, why?, at }`.
+- `ask_count` — server-tracked count of question/photo-request turns; hard cap 3, after
+  which the function forces a verdict.
+- `verdict` — jsonb `{ title, confidence, reasoning[], next_steps[], differential|null, follow_up|null }`,
+  set when concluded. `diagnosis_id` links the matching `diagnoses` history row
+  (`verdict_id = 'ai-session'`).
+- Session photos live in storage under `{userId}/{plantId}/diagnosis/…` and are **not**
+  rows in `photos` (keeps Timelapse and the photo strip clean).
+
 ### `care_recommendations` *(v1.6.0 — Phase 1 of docs/ASSISTANT-SPEC.md; **applied in production 2026-06-10** — verified: 14 columns, RLS on, 1 policy)*
 
 Structured next steps proposed by the assistant. Created by the **client** after an AI
-analysis (one row per action, plus one carrying an `interval_suggestion` when present);
-resolved by the user from Today or Plant Detail. Later phases add `diagnosis` and
-`seasonal` sources. The app degrades gracefully when this table is missing (queries
-soft-fail to empty lists), but Phase 1 features need it. Full DDL:
+analysis (one row per action, plus one carrying an `interval_suggestion` when present)
+or after an AI examination verdict (`source='diagnosis'`, v1.7.0 — one row per next step
+plus a scheduled follow-up check); resolved by the user from Today or Plant Detail.
+Phase 3 adds the `seasonal` source. The app degrades gracefully when this table is
+missing (queries soft-fail to empty lists), but Phase 1 features need it. Full DDL:
 
 ```sql
 create table if not exists care_recommendations (
@@ -150,7 +189,7 @@ create policy "Users manage own care_recommendations" on care_recommendations
 ```
 
 Column notes:
-- `source_id` — the `analysis_results` (later: `diagnoses`) row the recommendation came
+- `source_id` — the `analysis_results` or `diagnoses` row the recommendation came
   from; intentionally no FK so analyses can be deleted without losing the task.
 - `interval_suggestion` — jsonb `{ type: 'watering'|'fertilizing', current_days, suggested_days, reason }`;
   only applied to `plants.*_interval_days` after the user confirms in the interval sheet.
@@ -198,8 +237,15 @@ create policy "Users manage own propagations" on propagations
   `/storage/v1/object/public/plant-photos/...`).
 - Upload path convention: `{userId}/{plantId}/{timestamp}.{ext}`, uploaded from the browser
   with the file's own MIME type.
+- **Diagnosis session photos** (v1.7.0) upload under
+  `{userId}/{plantId}/diagnosis/{sessionFolder}/{timestamp}.{ext}` and get **no `photos`
+  row** — they belong to the examination transcript, not the plant's photo journal.
+  `diagnose-plant` only accepts photo paths under the caller's own
+  `{userId}/{plantId}/diagnosis/` prefix (path-traversal and cross-user access rejected).
 - `analyze-plant` refuses to fetch any image outside this bucket (SSRF guard).
-- Deleting a plant first removes all its files under `plant-photos/{userId}/{plantId}/`.
+- Deleting a plant first removes all its files under `plant-photos/{userId}/{plantId}/`,
+  including the nested `diagnosis/{sessionFolder}/` photos (storage `list()` is not
+  recursive, so the delete flow walks the diagnosis subfolders explicitly — v1.7.0).
 - **TODO/unverified:** the bucket's storage policies (who can upload/delete which paths) are
   not recorded in the repo.
 
@@ -255,9 +301,10 @@ CREATE INDEX IF NOT EXISTS idx_care_logs_plant_category
 ALTER TABLE plants ADD COLUMN IF NOT EXISTS is_name_verified boolean DEFAULT false;
 ```
 
-Plus the `diagnoses` and `propagations` blocks above (applied 2026-06-09), and the
-`care_recommendations` block above (**v1.6.0 — NOT yet applied in production**; run it in
-the Supabase SQL editor before using the assistant features).
+Plus the `diagnoses` and `propagations` blocks above (applied 2026-06-09), the
+`care_recommendations` block above (applied 2026-06-10), and the `diagnosis_sessions`
+block above (**v1.7.0 — NOT yet applied in production**; run it in the Supabase SQL
+editor before using the AI examination).
 
 > Phase 15 note: the journaling columns are nullable with no backfill **on purpose** —
 > backfilling `'general'` onto old notes would mislead the AI into treating uncategorized
@@ -368,5 +415,5 @@ create policy "Authenticated users read species profiles" on species_profiles
   for select using (auth.role() = 'authenticated');
 ```
 
-Then run the `diagnoses`, `propagations`, and `care_recommendations` blocks from the
-Tables section, and create the public `plant-photos` storage bucket (see [SETUP.md](SETUP.md)).
+Then run the `diagnoses`, `propagations`, `care_recommendations`, and `diagnosis_sessions`
+blocks from the Tables section, and create the public `plant-photos` storage bucket (see [SETUP.md](SETUP.md)).

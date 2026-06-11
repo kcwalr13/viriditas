@@ -8,7 +8,7 @@ This file is the single source of truth for **where the app stands, what's open,
 
 ---
 
-## Current State (v1.6.0 — June 2026)
+## Current State (v1.7.0 — June 2026)
 
 **Live URL:** https://viriditas-three.vercel.app/
 **Repo:** https://github.com/kcwalr13/viriditas (auto-deploys `main` → Vercel)
@@ -53,21 +53,28 @@ reviewable next steps that flow into the Today task list (Phase 1 of
 - **Me (`/settings`)** — identity, stats (plants / logs / analyses / streak), personality
   insights, JSON data export, sign out, app version.
 - **AI / Edge Functions** — `analyze-plant` (v2: structured actions + interval suggestions
-  + identity context, v1.6.0), `fetch-species-info`, `identify-species`, `suggest-species`.
-  All four require a valid Supabase session (`getUser()`), hardened v1.5.0 (SSRF imageUrl
-  allowlist, explicit-field upserts, MIME allowlist). Claude Haiku
-  (`claude-haiku-4-5-20251001`); Gemini swappable on the first two via `AI_PROVIDER`.
-  Reference: [docs/EDGE-FUNCTIONS.md](docs/EDGE-FUNCTIONS.md).
+  + identity context, v1.6.0), `diagnose-plant` (interactive diagnosis sessions on
+  `claude-sonnet-4-6`, v1.7.0), `fetch-species-info`, `identify-species`,
+  `suggest-species`. All five require a valid Supabase session (`getUser()`), hardened
+  v1.5.0 (SSRF imageUrl allowlist, explicit-field upserts, MIME allowlist). Claude Haiku
+  (`claude-haiku-4-5-20251001`) on the volume paths; Gemini swappable on
+  analyze-plant/fetch-species-info via `AI_PROVIDER`. Shared prompt-context builders live
+  in `supabase/functions/_shared/`. Reference: [docs/EDGE-FUNCTIONS.md](docs/EDGE-FUNCTIONS.md).
 - **AI care assistant (Phase 1, v1.6.0)** — analyses emit 0–3 structured actions + optional
   schedule suggestions → `care_recommendations` proposals → Today's "Assistant" section
   with Accept / Done (auto-logs unambiguous care types) / Dismiss-with-reason; accepted
   tasks join the task list; interval changes apply only via a confirm sheet; 14-day expiry.
   Species identity verification (Confirm chip / VERIFIED tag / verified Add Plant saves)
   feeds an identity-hedging line back into analysis prompts.
+- **AI care assistant (Phase 2, v1.7.0)** — "Examine with AI" on the Diagnose screen:
+  bounded multimodal diagnosis sessions (≤3 server-tracked ask-turns, then a forced
+  verdict; honest Low-confidence verdicts with differentials). Verdicts write the
+  `diagnoses` history and feed Phase 1's loop as proposals, including a scheduled
+  follow-up check. Quick triage (static tree) retained; sessions resume for 24h.
 - **Data layer** — `plants`, `photos`, `care_logs`, `analysis_results`, `species_profiles`,
   `diagnoses`, `propagations` (applied in production 2026-06-09), `care_recommendations`
-  (v1.6.0 — **migration pending production**). Schema reference:
-  [docs/DATABASE.md](docs/DATABASE.md).
+  (applied 2026-06-10), `diagnosis_sessions` (v1.7.0 — **migration pending production**).
+  Schema reference: [docs/DATABASE.md](docs/DATABASE.md).
 
 ---
 
@@ -79,7 +86,8 @@ reviewable next steps that flow into the Today task list (Phase 1 of
 |---|---|---|
 | Test account credential in git history | ✅ | The old `ROADMAP_CURRENT.md` contained the `uitester` test-account credential in plaintext; it remains in git history even though the file is deleted. **Closed as accepted risk (Kyle, 2026-06-10):** it's a placeholder test account, the repo is private, and exposure doesn't matter. Do not re-flag in future reviews. Revisit only if the repo gains collaborators or goes public; keep future credentials out of the repo regardless. |
 | Re-enable Supabase email confirmation | ⬜ | Disabled for development convenience; required before sharing with real users. |
-| Apply the `care_recommendations` migration in production | ⬜ | **Required for the v1.6.0 assistant features.** Run the DDL block from [docs/DATABASE.md](docs/DATABASE.md) in the Supabase SQL editor; until then the new UI degrades to empty (no crashes). Then redeploy `analyze-plant`. |
+| Apply the `care_recommendations` migration in production | ✅ | Applied 2026-06-10 (verified: 14 columns, RLS on, 1 policy). |
+| Apply the `diagnosis_sessions` migration + deploy v1.7.0 functions | ⬜ | **Required for the v1.7.0 AI examination.** Run the `diagnosis_sessions` DDL from [docs/DATABASE.md](docs/DATABASE.md); `supabase functions deploy diagnose-plant --no-verify-jwt`; **redeploy `analyze-plant`** (it now imports from `_shared/`). Until then the Diagnose screen offers the AI flow but sessions fail gracefully with an error message. |
 | Verify / apply `is_name_verified` migration | ✅ | Column confirmed live in production 2026-06-10 (boolean, default false); v1.6.0 shipped the code that reads/writes it (dossier Confirm chip, manual edits, Add Plant, analysis identity context). |
 | Tag releases in git | ⬜ | Versions exist in `package.json`/CHANGELOG but there are no git tags. Optional, cheap, useful. |
 
@@ -89,7 +97,7 @@ reviewable next steps that flow into the Today task list (Phase 1 of
 |---|---|---|
 | Camera Diagnose / Identify modes | ⬜ | The mode pills on `/camera` are visual only — Snap works; Diagnose and Identify don't route anywhere yet. |
 | Cover photo designation + reordering | ⬜ | Cover photo is always the most recent upload. Individual photo *delete* exists (lightbox + strip); choosing/reordering does not. |
-| AI-assisted Diagnose | ⬜ | The diagnostic tree is static (11 verdicts, no AI call). Passing the answers + a photo to `analyze-plant` (or a dedicated function) could sharpen verdicts. |
+| AI-assisted Diagnose | ✅ | Shipped v1.7.0 as full interactive sessions (`diagnose-plant`) — beyond the original "pass answers to analyze-plant" idea. The static tree remains as Quick triage. |
 | Lineage v2 — link child plants | ⬜ | `propagations.child_plant_id` is already nullable-ready; UI to link a propagation to a registered plant (and render a real graph) is unbuilt. |
 | Hemisphere setting | ⬜ | Season context passed to the AI hardcodes `northern`; southern-hemisphere users get inverted seasonal advice. |
 | Per-plant streak / streak history view | ⬜ | Streak strip currently links to Me; a dedicated history view was the intended destination. |
@@ -136,8 +144,13 @@ Full detail: [CHANGELOG.md](CHANGELOG.md) per version, git log per commit.
   [docs/ASSISTANT-SPEC.md](docs/ASSISTANT-SPEC.md): structured actions from `analyze-plant`
   v2 flow into the new `care_recommendations` table and the Today task loop
   (Accept/Done/Dismiss, interval confirm sheet, 14-day expiry), plus the Phase 5 species
-  identity verification slice. Remaining sessions: B = interactive diagnosis (Phase 2),
-  C = adaptive schedules + rest of accuracy program (Phases 3+5), D = web push (Phase 4).
+  identity verification slice.
+- **2026-06-10 — AI care assistant Session B (v1.7.0).** Phase 2, the flagship:
+  interactive diagnosis sessions via the new `diagnose-plant` Edge Function
+  (`claude-sonnet-4-6`) — bounded ask-back loop (≤3 turns), honest uncertainty, verdicts
+  into `diagnoses` + Today proposals; Diagnose screen reworked around "Examine with AI";
+  shared `_shared/plant-context.ts` extraction. Remaining sessions: C = adaptive
+  schedules + rest of accuracy program (Phases 3+5), D = web push (Phase 4).
 
 ### Key decisions log
 

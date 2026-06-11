@@ -4,6 +4,37 @@ All notable user-facing changes to Viriditas, newest first. The version number l
 `package.json` and is shown on the Me screen; versioning rules are in
 [CLAUDE.md → Versioning Convention](CLAUDE.md). Documentation-only changes don't bump the version.
 
+## 1.7.0 — 2026-06-10
+
+Interactive AI diagnosis sessions — Session B (Phase 2, the flagship) of
+[docs/ASSISTANT-SPEC.md](docs/ASSISTANT-SPEC.md).
+
+- **"Examine with AI"** on the Diagnose screen: a bounded, multimodal diagnostic session.
+  The new `diagnose-plant` Edge Function (Claude Sonnet, `claude-sonnet-4-6`) reads the
+  plant's full history server-side — species profile with disease signatures, care logs,
+  prior analyses and diagnoses, schedules, identity status — plus the session transcript
+  and photos, and replies with exactly one of: a question (with tappable answer options),
+  a specific photo request (with the reason it's needed), or a verdict.
+- **Hard honesty rules, server-enforced:** at most 3 ask-turns per session (`ask_count`
+  tracked server-side, never trusted from the client); at the cap the model is shown a
+  verdict-only contract. Insufficient information yields an honest Low-confidence verdict
+  with a differential ("if X doesn't improve, the alternative is Y") and safe next steps —
+  never fabricated certainty.
+- **Verdicts feed the Phase 1 loop:** the function writes the verdict into the existing
+  `diagnoses` history; the client turns each next step into a proposed recommendation on
+  Today, plus a scheduled follow-up check ("recheck in N days").
+- **Session photos stay out of the journal:** uploaded under a dedicated
+  `…/diagnosis/…` storage folder, never inserted into the `photos` table, so Timelapse
+  and the photo strip stay clean. The function only accepts photo paths inside the
+  caller's own diagnosis folder (the SSRF guard, adapted to storage paths).
+- **Resume/abandon:** navigating away keeps the session active; reopening Diagnose offers
+  "Resume examination" for up to 24 hours, after which the session is marked abandoned.
+- The static question tree remains as **"Quick triage — common issues"**, and the Diagnose
+  landing now shows a **Past examinations** history (AI and triage runs, tagged).
+- New `diagnosis_sessions` table (migration must be run in production); the
+  plant-context prompt sections were extracted to `supabase/functions/_shared/` so
+  analyze-plant and diagnose-plant share one context builder (redeploy `analyze-plant`).
+
 ## 1.6.0 — 2026-06-10
 
 AI care assistant, Phase 1 (structured actions) + Phase 5 identity slice — Session A of

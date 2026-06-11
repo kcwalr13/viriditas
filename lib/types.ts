@@ -114,6 +114,52 @@ export type AnalysisAction = {
   due_in_days: number | null
 }
 
+// ── Diagnosis sessions (Phase 2 — interactive AI examinations) ──────────────
+// One row per bounded diagnostic conversation. The diagnose-plant Edge
+// Function owns all writes (service role); the client only reads sessions
+// (to offer "Resume examination") and renders its local transcript mirror.
+
+export type DiagnosisSessionStatus = 'active' | 'concluded' | 'abandoned'
+
+// One entry in the session transcript (`diagnosis_sessions.turns` jsonb).
+export type DiagnosisTurn = {
+  role: 'user' | 'assistant'
+  type: 'opening' | 'photo' | 'answer' | 'question' | 'photo_request' | 'verdict'
+  text?: string
+  photo_path?: string          // storage path under {userId}/{plantId}/diagnosis/
+  options?: string[] | null    // tap-to-answer choices on 'question' turns
+  why?: string                 // the assistant's stated reason for asking
+  at: string                   // ISO timestamp
+}
+
+export type DiagnosisVerdict = {
+  title: string
+  confidence: 'High' | 'Medium' | 'Low'
+  reasoning: string[]
+  next_steps: Array<{ label: string; immediate: boolean }>
+  differential: string | null            // "If X doesn't improve, the alternative is Y"
+  follow_up: { days: number; check: string } | null
+}
+
+export type DiagnosisSession = {
+  id: string
+  plant_id: string
+  user_id: string
+  status: DiagnosisSessionStatus
+  turns: DiagnosisTurn[]
+  ask_count: number            // server-tracked; hard cap of 3 ask-turns
+  verdict: DiagnosisVerdict | null
+  diagnosis_id: string | null  // diagnoses.id once concluded
+  created_at: string
+  concluded_at: string | null
+}
+
+// What diagnose-plant returns in its `reply` field — exactly one of three.
+export type DiagnoseReply =
+  | { type: 'question'; text: string; options: string[] | null; why: string }
+  | { type: 'photo_request'; text: string; why: string }
+  | ({ type: 'verdict' } & DiagnosisVerdict)
+
 // Encyclopedic species reference data — fetched once per species via the
 // fetch-species-info Edge Function and cached permanently in Supabase.
 // Shared across all users (one row per species).

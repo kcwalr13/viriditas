@@ -1,10 +1,16 @@
 # Viriditas — Edge Function API Reference
 
 **Purpose:** request/response contract, auth model, error behavior, and deploy commands for
-the four Supabase Edge Functions that power the AI features. Source of truth is the code in
-`supabase/functions/*/index.ts`; this file mirrors it as of v1.6.0.
+the five Supabase Edge Functions that power the AI features. Source of truth is the code in
+`supabase/functions/*/index.ts`; this file mirrors it as of v1.7.0.
 
-## Common behavior (all four functions)
+> **Shared modules (v1.7.0):** `supabase/functions/_shared/` holds the plant-context
+> prompt builders (`plant-context.ts`) and image fetching with magic-byte type detection
+> (`images.ts`), used by both `analyze-plant` and `diagnose-plant`. Supabase bundles
+> `_shared/` into each function at deploy time — **changing a shared file requires
+> redeploying every function that imports it.**
+
+## Common behavior (all five functions)
 
 - **Auth (required):** functions are deployed with `--no-verify-jwt`, so each validates the
   caller itself. The browser must send `Authorization: Bearer <supabase access token>`; the
@@ -31,7 +37,7 @@ Set via `supabase secrets set KEY=value` (functions must be redeployed to pick u
 
 | Secret | Used by | Notes |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | all four | required |
+| `ANTHROPIC_API_KEY` | all five | required |
 | `AI_PROVIDER` | analyze-plant, fetch-species-info | `claude` (default if unset) or `gemini` |
 | `GEMINI_API_KEY` | analyze-plant, fetch-species-info | only needed when `AI_PROVIDER=gemini` |
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | (auto) | injected by Supabase; not set manually |
@@ -44,6 +50,7 @@ Set via `supabase secrets set KEY=value` (functions must be redeployed to pick u
 | `fetch-species-info` | ✅ | ✅ |
 | `identify-species` | ✅ | ❌ always Claude |
 | `suggest-species` | ✅ | ❌ always Claude |
+| `diagnose-plant` | ✅ `claude-sonnet-4-6` | ❌ always Claude (by design — see spec) |
 
 ### Deploy
 
@@ -52,6 +59,7 @@ supabase functions deploy analyze-plant --no-verify-jwt
 supabase functions deploy fetch-species-info --no-verify-jwt
 supabase functions deploy identify-species --no-verify-jwt
 supabase functions deploy suggest-species --no-verify-jwt
+supabase functions deploy diagnose-plant --no-verify-jwt
 ```
 
 ---
@@ -216,3 +224,78 @@ An empty/whitespace query returns `{ "suggestions": [] }` without calling the AI
 **Notes**
 - Thumbnails are *not* fetched here — the browser enriches results client-side from the free
   Wikipedia REST API (`https://en.wikipedia.org/api/rest_v1/page/summary/{scientificName}`).
+
+---
+
+## `diagnose-plant` *(v1.7.0)*
+
+Interactive diagnosis sessions (Phase 2 of `docs/ASSISTANT-SPEC.md`) — a bounded,
+multimodal diagnostic loop. Claude-only on **`claude-sonnet-4-6`** (the highest-stakes
+path at low volume). Called from the Diagnose screen's "Examine with AI" flow.
+
+**Request**
+
+```jsonc
+{
+  "sessionId": "uuid",      // omit on the first call — the function opens the session
+  "plantId": "uuid",        // required; must belong to the caller
+  "userText": "string",     // the complaint / answer; optional on the first call
+  "photoPath": "string"     // storage path of a just-uploaded session photo; optional
+}
+```
+
+The first call omits `sessionId` and opens with the owner's complaint (blank = general
+checkup) and optionally a fresh photo. Continuing a session requires `userText` or
+`photoPath`. Session photos are uploaded by the **client** to the `plant-photos` bucket
+under `{userId}/{plantId}/diagnosis/{sessionFolder}/{ts}.{ext}` **without** a `photos`
+table row; the function rejects any `photoPath` outside the caller's own
+`{userId}/{plantId}/diagnosis/` prefix (no traversal, no URLs).
+
+**Response 200**
+
+```jsonc
+{
+  "sessionId": "uuid",      // echo (or the freshly-opened session's id)
+  "askCount": 1,            // server-tracked ask-turns used so far (max 3)
+  "reply": { /* exactly ONE of the three shapes below */ },
+  "diagnosisId": "uuid"     // present only when reply.type === "verdict"
+}
+```
+
+`reply` shapes:
+
+```jsonc
+{ "type": "question",      "text": "...", "options": ["...", "..."] | null, "why": "..." }
+{ "type": "photo_request", "text": "Close-up of the underside of an affected leaf", "why": "..." }
+{ "type": "verdict",       "title": "...", "confidence": "High" | "Medium" | "Low",
+  "reasoning": ["..."],
+  "next_steps": [ { "label": "...", "immediate": true } ],
+  "differential": "If X doesn't improve, the alternative is Y" | null,
+  "follow_up": { "days": 4, "check": "..." } | null }
+```
+
+**Errors:** 401 unauthorized · 400 `plantId is required` / `sessionId must be a uuid` /
+bad `photoPath` / concluded session / continuation without input · 404 plant or session
+not found · 500 model/parse errors (an unusable reply after one retry, a failed
+session-turn save) · 500 `Could not open a diagnosis session — has the
+diagnosis_sessions migration been run?` (**the expected failure until the v1.7.0
+migration is applied in production**).
+
+**Notes**
+- **Context is assembled server-side** (the request carries none): plant row, species
+  profile (incl. `disease_symptoms`), last 10 care logs, last 3 analyses, last 3 prior
+  diagnoses, season, and identity-verified status — via the shared
+  `_shared/plant-context.ts` builders, identical to `analyze-plant`'s context.
+- **All session writes use the service role**, scoped to the authenticated user —
+  transcript and `ask_count` integrity never depend on the client. Turns are only
+  persisted alongside a successful reply, so a failed call can be retried safely.
+  One caveat: the **opening** call inserts the session row before the model call, so a
+  failed first call can leave behind an empty `active` session — the client treats
+  zero-turn sessions as not resumable and abandons them on the next Diagnose visit.
+- **The 3-ask cap is enforced twice:** the prompt switches to a verdict-only contract at
+  the cap, and an ask-type reply at the cap is discarded and retried as verdict-only.
+- On a verdict the function inserts the **`diagnoses`** history row (`verdict_id:
+  'ai-session'`, `question_path` = compact transcript) and concludes the session; the
+  client then inserts `care_recommendations` proposals for the next steps + follow-up.
+- Up to the 4 most recent session photos are attached to the model call, fetched with
+  magic-byte media-type detection (`_shared/images.ts`).

@@ -4,6 +4,15 @@ All notable user-facing changes to Viriditas, newest first. The version number l
 `package.json` and is shown on the Me screen; versioning rules are in
 [CLAUDE.md → Versioning Convention](CLAUDE.md). Documentation-only changes don't bump the version.
 
+## 1.10.1 — 2026-06-11
+
+Model upgrade, no feature changes: all four remaining Haiku Edge Functions
+(`analyze-plant`, `fetch-species-info`, `identify-species`, `suggest-species`)
+now run `claude-sonnet-4-6`, matching `diagnose-plant`. Rationale: accuracy
+over cost while the app is solo-use (a same-photo species ID disagreed
+between Haiku and Sonnet during v1.10.0 verification); revisit if usage
+grows. All four functions require redeploy.
+
 ## 1.10.0 — 2026-06-11
 
 Camera Diagnose / Identify modes — the `/camera` mode pills (Snap · Diagnose · Identify)

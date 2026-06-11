@@ -56,10 +56,10 @@ Set via `supabase secrets set KEY=value` (functions must be redeployed to pick u
 
 | Function | Model |
 |---|---|
-| `analyze-plant` | `claude-haiku-4-5-20251001` |
-| `fetch-species-info` | `claude-haiku-4-5-20251001` |
-| `identify-species` | `claude-haiku-4-5-20251001` |
-| `suggest-species` | `claude-haiku-4-5-20251001` |
+| `analyze-plant` | `claude-sonnet-4-6` (v1.10.1; was Haiku) |
+| `fetch-species-info` | `claude-sonnet-4-6` (v1.10.1; was Haiku) |
+| `identify-species` | `claude-sonnet-4-6` (v1.10.1; was Haiku) |
+| `suggest-species` | `claude-sonnet-4-6` (v1.10.1; was Haiku) |
 | `diagnose-plant` | `claude-sonnet-4-6` (highest-stakes path — see spec cost note) |
 | `send-care-push` | — (no AI; sends web push) |
 

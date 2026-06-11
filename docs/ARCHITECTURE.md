@@ -27,7 +27,7 @@ structural changes. Conventions and gotchas for day-to-day coding live in
                             │ server-side fetch (keys never in browser)
                             ▼
               Anthropic Claude API (sole provider since v1.8.0:
-              claude-haiku-4-5; claude-sonnet-4-6 for diagnose-plant)
+              claude-sonnet-4-6 on all five AI functions since v1.10.1)
 ```
 
 There is no Next.js API layer of our own: the browser talks to Supabase directly (RLS is the
@@ -96,7 +96,7 @@ entered) or the latest `analysis_results.species` (AI-identified). Always resolv
 Full contracts: [EDGE-FUNCTIONS.md](EDGE-FUNCTIONS.md).
 
 **Provider:** Claude only — the `AI_PROVIDER` switch and Gemini branches were retired
-in v1.8.0 (spec decision #1). Haiku on the volume paths, Sonnet on `diagnose-plant`.
+in v1.8.0 (spec decision #1). Sonnet everywhere since v1.10.1 (was: Haiku volume paths / Sonnet diagnose) — accuracy over cost while solo-use; revisit if usage grows.
 
 **Security model (since v1.5.0):** all functions are deployed `--no-verify-jwt`; the five
 AI functions authenticate every call via `getUser()` (`send-care-push` instead requires

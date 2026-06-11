@@ -1,7 +1,7 @@
 // supabase/functions/analyze-plant/index.ts
 //
 // Edge Function that analyzes a plant photo using an AI vision model.
-// Provider: Claude only (claude-haiku-4-5). The Gemini branch and the
+// Provider: Claude only (claude-sonnet-4-6 since v1.10.1). The Gemini branch and the
 // AI_PROVIDER switch were retired in v1.8.0 (spec decision #1 — one product
 // voice, one quality bar); git history preserves the old paths.
 //
@@ -185,7 +185,7 @@ async function callClaude(base64Image: string, mediaType: ImageMediaType, prompt
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-sonnet-4-6',  // upgraded from Haiku 2026-06-11 — accuracy over cost while solo-use (see CHANGELOG 1.10.1)
       // v2 adds structured actions to the output — 1024 was occasionally
       // tight with 3 actions + rationales on top of health/care prose.
       max_tokens: 1536,

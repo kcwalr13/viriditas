@@ -91,7 +91,7 @@ serve(async (req) => {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: 'claude-sonnet-4-6',  // upgraded from Haiku 2026-06-11 — accuracy over cost while solo-use (see CHANGELOG 1.10.1)
         max_tokens: 100,
         messages: [{
           role: 'user',

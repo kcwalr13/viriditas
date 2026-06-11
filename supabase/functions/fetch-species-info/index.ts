@@ -76,7 +76,7 @@ async function callClaude(speciesName: string): Promise<Record<string, string>> 
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-sonnet-4-6',  // upgraded from Haiku 2026-06-11 — accuracy over cost while solo-use (see CHANGELOG 1.10.1)
       max_tokens: 2048,   // Species profiles are longer than health analyses
       messages: [{
         role: 'user',

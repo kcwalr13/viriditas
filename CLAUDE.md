@@ -29,7 +29,7 @@ Kyle is a beginner developer who relies on Claude to write most of the code. Alw
 | Auth | Supabase Auth via `@supabase/ssr` (cookie-based, SSR-safe) |
 | Database | Supabase (PostgreSQL) |
 | File/Photo Storage | Supabase Storage |
-| AI Integration | Supabase Edge Functions → Claude API only (`claude-haiku-4-5-20251001`; `diagnose-plant` uses `claude-sonnet-4-6`). Gemini + the `AI_PROVIDER` switch were retired in v1.8.0 |
+| AI Integration | Supabase Edge Functions → Claude API only (`claude-sonnet-4-6` on all five AI functions since v1.10.1). Gemini + the `AI_PROVIDER` switch were retired in v1.8.0 |
 | Deployment | Vercel (auto-deploys on every push to main) |
 
 **Language:** TypeScript throughout. No `any` types.
@@ -90,7 +90,7 @@ viriditas/
       _shared/
         plant-context.ts     # Shared context-section builders + types (analyze-plant + diagnose-plant)
         images.ts            # Shared image fetch with magic-byte media-type detection
-      analyze-plant/         index.ts   # Edge Function: AI plant analysis (Haiku)
+      analyze-plant/         index.ts   # Edge Function: AI plant analysis (Sonnet)
       diagnose-plant/        index.ts   # Edge Function: interactive diagnosis sessions (Sonnet, ≤3 ask-turns)
       fetch-species-info/    index.ts   # Edge Function: AI species profile
       identify-species/      index.ts   # Edge Function: species from base64 photo (no storage)
@@ -384,7 +384,8 @@ ALTER TABLE care_logs ADD CONSTRAINT care_logs_type_check CHECK (type IN (...all
 - **Claude only** (spec decision #1, implemented v1.8.0). The Gemini branches, the
   `AI_PROVIDER` switch, and the `GEMINI_API_KEY` secret were retired; git history
   preserves the old paths. Do not reintroduce a second provider.
-- Models: `claude-haiku-4-5-20251001` on the volume paths (analyze, species info,
+- Models: `claude-sonnet-4-6` on all five AI functions (v1.10.1 — was Haiku on the volume paths:
+  analyze, species info,
   identify, suggest); `claude-sonnet-4-6` on `diagnose-plant` (highest-stakes path).
 - Base64 encoding in Edge Functions: use Deno's std library (`import { encode as encodeBase64 } from 'https://deno.land/std@0.168.0/encoding/base64.ts'`)
 
@@ -532,4 +533,5 @@ When a version bumps, also add a matching entry to `CHANGELOG.md` (the human-fac
 - `1.7.0` — AI care assistant Session B (Phase 2, the flagship): interactive diagnosis sessions. New `diagnosis_sessions` table + `diagnose-plant` Edge Function (`claude-sonnet-4-6`): server-assembled context, ≤3 server-tracked ask-turns, honest Low-confidence verdicts with differentials, verdict → `diagnoses` history + `care_recommendations` proposals (incl. scheduled follow-up). Diagnose screen rework: "Examine with AI" transcript UI, Quick triage retained, Past examinations list, 24h resume/abandon. Plant-context prompt builders extracted to `supabase/functions/_shared/` (analyze-plant redeploy required).
 - `1.8.0` — AI care assistant Session C (Phase 3 + rest of Phase 5): seasonal schedule review (`lib/seasonal.ts` heuristics, monthly localStorage gate, per-season dedupe, Phase 1 confirm flow); toxicity caution caption on Plant Detail + Explore; Gemini retirement (`analyze-plant` + `fetch-species-info` Claude-only, `AI_PROVIDER`/`GEMINI_API_KEY` secrets droppable, both functions need redeploy); species fact flagging (`species_profile_flags` table, Report-an-issue sheet on species guides, Me → Flagged facts review list).
 - `1.9.0` — AI care assistant Session D (Phase 4, the final phase): care reminders via web push. `push_subscriptions` table + Me → Care reminders per-device opt-in/revoke (iOS A2HS caveat in the copy); `public/sw.js` service worker (push + click only); `lib/notifications.ts` stub → real helpers; `send-care-push` Edge Function (no AI; `x-cron-secret` auth, service role) sends one digest/user/day of overdue care + due assistant tasks, silent on quiet days, deep-link to Today, self-pruning subscriptions; scheduled by pg_cron + pg_net at 13:00 UTC (manual SQL in SETUP.md). Manual steps: migration, VAPID keys + `CRON_SECRET` secrets, `NEXT_PUBLIC_VAPID_PUBLIC_KEY` env (local + Vercel), function deploy, cron schedule.
+- `1.10.1` — All Edge Functions on Sonnet: the four Haiku paths upgraded to `claude-sonnet-4-6` (accuracy over cost while solo-use; a same-photo ID disagreement between tiers surfaced in v1.10.0 verification). Redeploy all four.
 - `1.10.0` — Camera Diagnose/Identify modes (roadmap item; client-only). The `/camera` mode pills work: Diagnose uploads the capture as a diagnosis-session opener (session-photo path convention, no `photos` row) and hands off via sessionStorage to the Diagnose screen's "Examine with AI" flow; Identify calls `identify-species` (base64, no storage) and offers Confirm-for-existing-plant (sets `species` + `is_name_verified`) or Add-as-new-plant (`/add-plant?species=` pre-fill). No schema or Edge Function changes.

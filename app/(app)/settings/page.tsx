@@ -8,14 +8,26 @@ import { BigTitle, SectionLabel } from '@/components/ui'
 import { Icon } from '@/components/Icon'
 import { computeStreak, computeMaxStreak, relativeTime, formatTimestamp } from '@/lib/utils'
 import { flagFieldLabel } from '@/components/FlagFactSheet'
+import {
+  isPushSupported, isIos, isStandalone,
+  getExistingSubscription, enableCareReminders, disableCareReminders,
+} from '@/lib/notifications'
 import pkg from '@/package.json'
+
+// UI state for the Care reminders card. 'denied' means the user blocked
+// notifications at the browser level — we can't re-prompt, only explain.
+type PushUiState = 'loading' | 'unsupported' | 'denied' | 'off' | 'on'
 
 export default function MePage() {
   const router   = useRouter()
   const supabase = createClient()
 
   const [email,      setEmail]      = useState<string | null>(null)
+  const [userId,     setUserId]     = useState<string | null>(null)
   const [signingOut, setSigningOut] = useState(false)
+  const [pushState,  setPushState]  = useState<PushUiState>('loading')
+  const [pushBusy,   setPushBusy]   = useState(false)
+  const [pushError,  setPushError]  = useState<string | null>(null)
   const [exporting,  setExporting]  = useState(false)
   const [stats, setStats] = useState<{ plants: number; logs: number; analyses: number; streak: number; maxStreak: number } | null>(null)
   const [oldestPlant, setOldestPlant] = useState<{ nickname: string; months: number } | null>(null)
@@ -32,6 +44,7 @@ export default function MePage() {
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) return
       setEmail(user.email ?? null)
+      setUserId(user.id)
       const oneYearAgo = new Date()
       oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1)
       const [{ count: plants }, { count: logs }, { count: analyses }, { data: streakLogs }, { data: allPlants }, { data: careTypes }, { data: allPlantNames }, { data: lastLog }] = await Promise.all([
@@ -114,6 +127,50 @@ export default function MePage() {
       }
     })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Care reminders — work out this device's current push state on mount.
+  // Pure reads: nothing here registers the service worker or prompts.
+  useEffect(() => {
+    if (!isPushSupported()) { setPushState('unsupported'); return }
+    if (Notification.permission === 'denied') { setPushState('denied'); return }
+    getExistingSubscription()
+      .then(sub => setPushState(sub ? 'on' : 'off'))
+      .catch(() => setPushState('off'))
+  }, [])
+
+  async function handleEnablePush() {
+    if (!userId || pushBusy) return
+    setPushBusy(true)
+    setPushError(null)
+    try {
+      const result = await enableCareReminders(supabase, userId)
+      if (result.ok) {
+        setPushState('on')
+      } else if (result.reason === 'permission-denied') {
+        setPushState('denied')
+      } else if (result.reason === 'no-key') {
+        setPushError('Push isn’t configured yet — NEXT_PUBLIC_VAPID_PUBLIC_KEY is missing.')
+      } else {
+        setPushError(result.detail ?? 'Something went wrong turning on reminders.')
+      }
+    } finally {
+      setPushBusy(false)
+    }
+  }
+
+  async function handleDisablePush() {
+    if (pushBusy) return
+    setPushBusy(true)
+    setPushError(null)
+    try {
+      await disableCareReminders(supabase)
+      setPushState('off')
+    } catch {
+      setPushError('Could not fully turn off reminders — try again.')
+    } finally {
+      setPushBusy(false)
+    }
+  }
 
   async function handleExport() {
     setExporting(true)
@@ -292,6 +349,81 @@ export default function MePage() {
         </button>
       </div>
 
+      {/* ── Care reminders (Phase 4 web push) ─────────────────────────── */}
+      <SectionLabel number={oldestPlant ? '§ 05' : '§ 04'} title="Care reminders" />
+      <div className="mx-5 px-4 py-4 bg-card border border-rule rounded-brand-lg">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-full bg-accent-soft flex items-center justify-center shrink-0">
+            <Icon name="clock" size={18} stroke={1.8} className="text-accent" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="font-serif italic text-[17px] text-ink leading-tight">
+              Morning digest
+            </div>
+            <p className="text-[12px] text-ink-soft mt-1 leading-snug">
+              One notification around 9 am when plants need attention — overdue
+              watering or feeding, plus any assistant tasks due. At most one a
+              day; nothing on quiet days.
+            </p>
+          </div>
+        </div>
+
+        {/* State-dependent action / explanation */}
+        <div className="mt-3">
+          {pushState === 'loading' && (
+            <p className="font-mono text-[10px] tracking-[0.1em] uppercase text-ink-muted">Checking this device…</p>
+          )}
+          {pushState === 'unsupported' && (
+            <p className="text-[12px] text-ink-soft leading-snug">
+              {isIos() && !isStandalone()
+                ? 'This browser can’t receive notifications directly. Install Viriditas first: tap Share, then “Add to Home Screen”, and turn reminders on from the installed app.'
+                : 'This browser doesn’t support push notifications. Try Chrome, Edge, Firefox, or the installed app.'}
+            </p>
+          )}
+          {pushState === 'denied' && (
+            <p className="text-[12px] text-ink-soft leading-snug">
+              Notifications are blocked for Viriditas in this browser. Allow
+              them in your browser’s site settings, then come back here.
+            </p>
+          )}
+          {pushState === 'off' && (
+            <button
+              onClick={handleEnablePush}
+              disabled={pushBusy || !userId}
+              className="w-full py-2.5 rounded-full bg-ink text-paper text-[13px] font-medium disabled:opacity-60"
+            >
+              {pushBusy ? 'Turning on…' : 'Turn on for this device'}
+            </button>
+          )}
+          {pushState === 'on' && (
+            <div className="flex items-center justify-between gap-3">
+              <span className="font-mono text-[10px] tracking-[0.12em] uppercase text-accent">
+                On · this device
+              </span>
+              <button
+                onClick={handleDisablePush}
+                disabled={pushBusy}
+                className="px-4 py-2 rounded-full border border-rule text-[12px] font-medium text-ink-soft disabled:opacity-60"
+              >
+                {pushBusy ? 'Turning off…' : 'Turn off'}
+              </button>
+            </div>
+          )}
+          {pushError && (
+            <p className="mt-2 text-[12px] text-danger leading-snug">{pushError}</p>
+          )}
+        </div>
+
+        {/* iOS caveat — always visible so iPhone users know why a normal
+            Safari tab shows "unsupported". */}
+        {pushState !== 'unsupported' && (
+          <p className="mt-3 pt-3 border-t border-dashed border-rule font-mono text-[9px] tracking-[0.08em] uppercase text-ink-muted leading-relaxed">
+            iPhone &amp; iPad: add Viriditas to your Home Screen first — iOS only
+            delivers notifications to the installed app.
+          </p>
+        )}
+      </div>
+
       {/* ── Flagged facts (Phase 5 accuracy program) ──────────────────── */}
       {flaggedFacts.length > 0 && (
         <>
@@ -331,7 +463,7 @@ export default function MePage() {
       )}
 
       {/* ── About ─────────────────────────────────────────────────────── */}
-      <SectionLabel number={oldestPlant ? '§ 05' : '§ 04'} title="About" />
+      <SectionLabel number={oldestPlant ? '§ 06' : '§ 05'} title="About" />
       <div className="mx-5 bg-card border border-rule rounded-brand-lg">
         <div className="flex items-center justify-between px-4 py-3.5 border-b border-dashed border-rule">
           <span className="font-mono text-[10px] tracking-[0.12em] uppercase text-ink-muted">App</span>

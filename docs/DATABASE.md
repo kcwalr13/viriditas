@@ -225,6 +225,40 @@ Column notes:
   `dismissed` (with `dismissed_reason`), or `proposed` → `expired` (client marks
   proposals older than 14 days on Today load). `resolved_at` set on done/dismissed/expired.
 
+### `push_subscriptions` *(v1.9.0 — Phase 4 of docs/ASSISTANT-SPEC.md; **applied in production 2026-06-11** — verified: 6 columns, RLS on, 1 policy)*
+
+One row per browser/device push subscription (a user with desktop + installed iOS PWA
+has two rows). Created by the Settings → Care reminders opt-in; deleted on revoke, and
+pruned automatically by `send-care-push` when a push endpoint returns 404/410 (the
+browser revoked it). The client degrades gracefully when this table is missing. Full DDL:
+
+```sql
+create table if not exists push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id),
+  endpoint text not null unique,
+  keys jsonb not null,
+  last_pushed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_push_subs_user on push_subscriptions(user_id);
+alter table push_subscriptions enable row level security;
+create policy "Users manage own push_subscriptions" on push_subscriptions
+  for all using (auth.uid() = user_id);
+```
+
+Column notes:
+- `endpoint` — the push service URL handed out by the browser; globally unique, so the
+  opt-in upserts on it (re-enabling on the same device never duplicates).
+- `keys` — jsonb `{ p256dh, auth }` from `PushSubscription.toJSON()`, required by the
+  Web Push encryption.
+- `last_pushed_at` — set by `send-care-push` after a successful send; the function skips
+  any user already pushed today (Eastern), so the **max one push per day** rule holds even
+  if the cron job fires twice. *Addition over the spec's Appendix A*, as is the
+  `idx_push_subs_user` index (the sender's per-user lookup).
+- Reads/writes from the client go through RLS; `send-care-push` uses the service role
+  (it has no user JWT — it's invoked by pg_cron, authenticated by a `CRON_SECRET` header).
+
 ### `propagations` *(applied in production 2026-06-09)*
 
 Propagation/lineage records. Full verified DDL:
@@ -331,8 +365,9 @@ ALTER TABLE plants ADD COLUMN IF NOT EXISTS is_name_verified boolean DEFAULT fal
 
 Plus the `diagnoses` and `propagations` blocks above (applied 2026-06-09), the
 `care_recommendations` block (applied 2026-06-10), the `diagnosis_sessions` block
-(applied 2026-06-10), and the `species_profile_flags` block above (**v1.8.0 — NOT yet
-applied in production**; run it in the Supabase SQL editor before using fact flagging).
+(applied 2026-06-10), the `species_profile_flags` block (applied 2026-06-11), and the
+`push_subscriptions` block above (**v1.9.0 — NOT yet applied in production**; run it in
+the Supabase SQL editor before using Care reminders).
 
 > Phase 15 note: the journaling columns are nullable with no backfill **on purpose** —
 > backfilling `'general'` onto old notes would mislead the AI into treating uncategorized
@@ -444,5 +479,5 @@ create policy "Authenticated users read species profiles" on species_profiles
 ```
 
 Then run the `diagnoses`, `propagations`, `care_recommendations`, `diagnosis_sessions`,
-and `species_profile_flags` blocks from the Tables section, and create the public
-`plant-photos` storage bucket (see [SETUP.md](SETUP.md)).
+`species_profile_flags`, and `push_subscriptions` blocks from the Tables section, and
+create the public `plant-photos` storage bucket (see [SETUP.md](SETUP.md)).

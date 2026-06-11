@@ -113,7 +113,7 @@ reviewable next steps that flow into the Today task list (Phase 1 of
 
 | Item | Status | Notes |
 |---|---|---|
-| Web push notifications | ⬜ | `lib/notifications.ts` is a no-op stub. Needs a service worker, VAPID keys, and subscription management. Biggest gap between "tracker" and "reminder app". |
+| Web push notifications | ✅ v1.9.0 | Shipped as assistant Phase 4: Me → Care reminders opt-in, `public/sw.js`, `push_subscriptions` table, `send-care-push` daily digest via pg_cron. Manual setup steps (migration, VAPID/CRON_SECRET secrets, cron SQL) in [docs/SETUP.md](docs/SETUP.md). |
 | Offline support | ⬜ | All data requires network. Service-worker caching of Today + recent plants would make the PWA genuinely offline-capable. |
 | Plant sharing / social | ⬜ | Not designed. Requires RLS changes to let other users read specific records. |
 | Native builds (app stores) | ⬜ | Deliberately deferred since the March 2026 Expo→Next.js pivot; would be a new effort, not a resurrection of the archived Expo code. |
@@ -161,8 +161,13 @@ Full detail: [CHANGELOG.md](CHANGELOG.md) per version, git log per commit.
   monthly seasonal schedule proposals (prose-corroborated heuristics in
   `lib/seasonal.ts`, silence over noise); toxicity caution captions; Gemini +
   `AI_PROVIDER` retired (Claude sole provider, decision #1); species fact flagging
-  (`species_profile_flags` + Report-an-issue sheet + Me → Flagged facts). Remaining:
-  Session D = web push (Phase 4).
+  (`species_profile_flags` + Report-an-issue sheet + Me → Flagged facts).
+- **2026-06-11 — AI care assistant Session D (v1.9.0).** Phase 4, the final phase: web
+  push care reminders. Per-device opt-in under Me → Care reminders (`push_subscriptions`
+  table + `public/sw.js`), and the `send-care-push` Edge Function — a pg_cron-invoked
+  daily digest (max one push/user/day, silent on quiet days, deep-link to Today) of
+  overdue care + due assistant tasks, sent via web-push/VAPID and authenticated with a
+  dedicated `CRON_SECRET` header. The assistant spec is now fully implemented.
 
 ### Key decisions log
 

@@ -4,6 +4,34 @@ All notable user-facing changes to Viriditas, newest first. The version number l
 `package.json` and is shown on the Me screen; versioning rules are in
 [CLAUDE.md → Versioning Convention](CLAUDE.md). Documentation-only changes don't bump the version.
 
+## 1.9.0 — 2026-06-11
+
+Care reminders (web push) — Session D (Phase 4, the final phase) of
+[docs/ASSISTANT-SPEC.md](docs/ASSISTANT-SPEC.md). The assistant can now reach out.
+
+- **Care reminders opt-in** under **Me → Care reminders:** turn on per device; the
+  browser asks for notification permission and the subscription is saved to the new
+  `push_subscriptions` table (migration must be run in production). Turning off revokes
+  the browser subscription and deletes the row. The card explains the iOS caveat: add
+  Viriditas to your Home Screen first — iOS only delivers notifications to the
+  installed app.
+- **Daily digest:** the new `send-care-push` Edge Function (no AI; invoked by
+  pg_cron + pg_net daily at 13:00 UTC ≈ 9 am Eastern) finds, per subscribed user,
+  overdue watering/feeding plus assistant tasks due (including diagnosis follow-up
+  checks) and sends one push — e.g. "2 plants need you 🌿 · Water Mabel · Recheck lower
+  leaves (Big Fern)" — deep-linking to Today. Hard rules: max one push per user per day,
+  nothing at all on quiet days. Dead subscriptions (revoked endpoints) self-prune.
+- **New service worker** (`public/sw.js`) — push + notification-click only, no offline
+  caching. `lib/notifications.ts` graduates from a no-op stub to the real
+  subscribe/revoke helpers.
+- **Security:** `send-care-push` has no user JWT — it requires a dedicated
+  `CRON_SECRET` header and fails closed when unconfigured. VAPID keys live only in
+  Supabase secrets; the client uses the public key via `NEXT_PUBLIC_VAPID_PUBLIC_KEY`.
+- **Manual steps required** (see [docs/SETUP.md](docs/SETUP.md) steps 4–5): run the
+  `push_subscriptions` migration, generate VAPID keys + `CRON_SECRET`, set the Supabase
+  secrets and the `NEXT_PUBLIC_VAPID_PUBLIC_KEY` env var (local + Vercel), deploy the
+  function, and schedule the pg_cron job.
+
 ## 1.8.0 — 2026-06-11
 
 Adaptive schedules + accuracy program — Session C (Phase 3 + the rest of Phase 5) of

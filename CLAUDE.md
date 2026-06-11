@@ -67,7 +67,7 @@ viriditas/
       explore/
         page.tsx             # Explore/Field Guide — category grid, featured carousel, search, species detail
       settings/
-        page.tsx             # Me — identity, sign out, about (shows package.json version)
+        page.tsx             # Me — identity, Care reminders (push opt-in), sign out, about (shows package.json version)
   components/
     Icon.tsx                # <Icon name="drop"/> — 38 single-stroke SVGs; replaces all emoji
     PlantPhoto.tsx          # Warm blocky gradient placeholder when no cover photo (deterministic from name)
@@ -84,7 +84,7 @@ viriditas/
     utils.ts                # formatDate, relativeTime, fileToBase64, computeWateringStatus, computeFertilizingStatus, computeStreak, computeMaxStreak, CARE_LOG_LABELS, URGENCY_ORDER
     recommendations.ts      # care_recommendations mutations: accept/done/dismiss/apply-interval/expire + action→care-log map
     seasonal.ts             # Phase 3 seasonal heuristics — rules table + prose-corroborated interval proposals
-    notifications.ts        # Stub — web push not supported; no-op exports
+    notifications.ts        # Web Push helpers (Phase 4): capability detection, subscribe/revoke, VAPID key handling
   supabase/
     functions/
       _shared/
@@ -95,23 +95,25 @@ viriditas/
       fetch-species-info/    index.ts   # Edge Function: AI species profile
       identify-species/      index.ts   # Edge Function: species from base64 photo (no storage)
       suggest-species/       index.ts   # Edge Function: 4-6 candidate species for a query
+      send-care-push/        index.ts   # Edge Function: daily push digest (no AI; pg_cron-invoked, CRON_SECRET auth)
   scripts/
     patch-ua-parser.js      # Prebuild patch for ua-parser-js in Edge Runtime
   docs/
     SETUP.md                # Zero-to-running guide (Supabase project, secrets, deploys, Vercel)
     ARCHITECTURE.md         # Auth/session model, two-layer plant profile, AI pipeline
     DATABASE.md             # Schema reference — tables, columns, constraints, RLS, migrations
-    EDGE-FUNCTIONS.md       # API reference for the five Edge Functions
+    EDGE-FUNCTIONS.md       # API reference for the six Edge Functions
   public/
     icon.png                # App icon (PWA)
     icon-192.png            # 192×192 PWA icon
     favicon.png             # Browser tab icon
     manifest.json           # PWA manifest
+    sw.js                   # Service worker — push + notification-click only (no offline caching)
   middleware.ts             # Auth-gates /(app); refreshes session cookies; whitelists password-reset routes
   next.config.ts            # Supabase Storage image domain allowlist
   tailwind.config.ts        # Editorial palette (paper/ink/accent) + font families
   CHANGELOG.md              # Per-version history (mirrors the Versioning Convention section below)
-  .env.local                # Gitignored — NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY
+  .env.local                # Gitignored — NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, NEXT_PUBLIC_VAPID_PUBLIC_KEY
 ```
 
 ## What Has Been Built
@@ -126,7 +128,7 @@ viriditas/
 - [x] `app/(app)/plant/[id]/page.tsx` — Plant Detail: single-scroll editorial layout (hero carousel + lightbox, status strip, AI diagnosis card, log book with filter tabs, dossier, watering + fertilizing schedule, species guide, photo strip, floating care dock). All data fetched client-side. Includes photo ZIP export via `jszip`.
 - [x] `app/(app)/add-plant/page.tsx` — Add Plant: 3-step wizard (identify → place → schedule). Step 1 uses `identify-species` for AI photo ID; plant row is created at step 3 submit.
 - [x] `app/(app)/explore/page.tsx` — Field Guide: AI Identify hero, category grid, featured carousel, recently-viewed (localStorage), text + photo search into species detail
-- [x] `app/(app)/settings/page.tsx` — Me: identity card, sign out, about
+- [x] `app/(app)/settings/page.tsx` — Me: identity card, Care reminders opt-in (v1.9.0), sign out, about
 - [x] `components/Icon.tsx` — 38 single-stroke SVGs replacing every emoji in the UI
 - [x] `components/ui.tsx` — BigTitle, SectionLabel, Chip, StatusPip, HairlineButton
 - [x] `components/BottomNav.tsx` — floating pill with route-based active state + camera FAB (accent-colored, floats above-right of nav; routes to `/camera`)
@@ -149,6 +151,7 @@ viriditas/
 - [x] **Species identity verification (v1.6.0, Phase 5 P0 slice)** — dossier Confirm chip / VERIFIED tag, manual species edits set `is_name_verified`, Add Plant saves confirmed/typed species as verified, `analyze-plant` gets an identity-verified context line
 - [x] **Adaptive schedules + accuracy program (v1.8.0, Phase 3 + rest of Phase 5)** — `lib/seasonal.ts` rules table generates once-per-month seasonal interval proposals (prose-corroborated, silence over noise) through the Phase 1 confirm flow; toxicity renders with an "AI-generated — verify with your vet" caption; Gemini + `AI_PROVIDER` retired (Claude sole provider); `species_profile_flags` + Report-an-issue sheet (Plant Detail + Explore) + Me → Flagged facts review list
 - [x] **Interactive AI diagnosis (v1.7.0, Phase 2)** — `diagnose-plant` Edge Function (`claude-sonnet-4-6`, Claude-only): server-assembled context + session transcript + photos; replies with exactly one of question / photo_request / verdict; ≤3 server-tracked ask-turns then a forced verdict; honest Low-confidence verdicts with differential + safe steps; verdicts write `diagnoses` (verdict_id `'ai-session'`) and the client inserts `care_recommendations` proposals (next steps + follow-up). Diagnose screen: "Examine with AI" session UI (field-notes styling), Quick triage (static tree) retained, Past examinations history, 24h resume/abandon. Context builders extracted to `supabase/functions/_shared/`
+- [x] **Care reminders / web push (v1.9.0, Phase 4 — final phase)** — `push_subscriptions` table (migration must be run in production) + Me → Care reminders opt-in/revoke per device (iOS A2HS caveat in the copy); `public/sw.js` (push + notification-click only); `lib/notifications.ts` rewritten from stub to real subscribe/revoke helpers (`NEXT_PUBLIC_VAPID_PUBLIC_KEY` on the client); `send-care-push` Edge Function (no AI, no user JWT — `x-cron-secret` header auth): per-user digest of overdue watering/feeding + `care_recommendations` due (incl. diagnosis follow-ups), max one push/user/day via `last_pushed_at`, silent on quiet days, deep-links to Today, prunes 404/410 endpoints; invoked daily 13:00 UTC by pg_cron + pg_net (schedule SQL in `docs/SETUP.md` step 5 — manual step)
 
 ## What Comes Next
 See `ROADMAP.md` for the current state, known gaps, priorities, and development history.
@@ -294,6 +297,12 @@ Floating pill with four tabs: **Today / Plants / Explore / Me**, plus an accent-
 - id, species_profile_id (FK → species_profiles, cascade), user_id, field, note (nullable), created_at
 - One row per user-reported issue with a species-guide fact; reviewed/resolved (deleted) under Me → Flagged facts; no auto-correction
 
+`push_subscriptions` *(v1.9.0 — assistant Phase 4; full SQL in `docs/DATABASE.md`; **applied in production 2026-06-11** — verified: 6 columns, RLS on, 1 policy)*
+- id, user_id, endpoint (unique — the browser push-service URL), keys (jsonb `{p256dh, auth}`), last_pushed_at (nullable), created_at
+- One row per browser/device; created by the Me → Care reminders opt-in (upsert on endpoint), deleted on revoke and auto-pruned by `send-care-push` when the push service returns 404/410
+- `last_pushed_at` + the user-id index are additions over the spec's Appendix A — they enforce max-one-push-per-day in the function
+- Client reads/writes via RLS; `send-care-push` uses the service role (no user JWT — pg_cron invokes it with a `CRON_SECRET` header)
+
 `care_recommendations` *(v1.6.0 — assistant Phase 1; full SQL in `docs/DATABASE.md`; **applied in production 2026-06-10** — verified: 14 columns, RLS on, 1 policy)*
 - id, plant_id, user_id, created_at, resolved_at (nullable)
 - source (CHECK: analysis/diagnosis/seasonal), source_id (uuid, nullable — the analysis row)
@@ -323,10 +332,10 @@ ALTER TABLE care_logs ADD CONSTRAINT care_logs_type_check CHECK (type IN (...all
 
 ### Environment Variables
 - In Next.js, client-visible env vars use `NEXT_PUBLIC_` prefix
-- `.env.local` keys: `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `.env.local` keys: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `NEXT_PUBLIC_VAPID_PUBLIC_KEY` (v1.9.0 — the web-push public key; safe to expose by design)
 - These must also be set in the Vercel dashboard (Settings → Environment Variables)
 - Restart `npm run dev` after any changes to `.env.local`
-- AI API keys live in Supabase secrets only — never in Next.js env files
+- AI API keys, the VAPID **private** key, and `CRON_SECRET` live in Supabase secrets only — never in Next.js env files
 
 ### Vercel Deployment
 - Production URL: **https://viriditas-three.vercel.app/**
@@ -354,7 +363,7 @@ ALTER TABLE care_logs ADD CONSTRAINT care_logs_type_check CHECK (type IN (...all
 - Always get the session first: `const { data: { session } } = await supabase.auth.getSession()`
 - Pass the token explicitly: `headers: { Authorization: \`Bearer ${session.access_token}\` }`
 - This is required because `supabase.functions.invoke` doesn't always inject the token reliably
-- Edge Functions are deployed with `--no-verify-jwt` flag; **all five validate the token themselves** by calling `supabase.auth.getUser()` with the forwarded Authorization header and returning 401 when it's missing or invalid (hardened in v1.5.0)
+- Edge Functions are deployed with `--no-verify-jwt` flag; **the five AI functions validate the token themselves** by calling `supabase.auth.getUser()` with the forwarded Authorization header and returning 401 when it's missing or invalid (hardened in v1.5.0). The sixth, `send-care-push` (v1.9.0), is never called from the browser — pg_cron invokes it and it authenticates via the `x-cron-secret` header (rejects everything else; fails closed if `CRON_SECRET` is unset)
 - Additional v1.5.0 hardening: `analyze-plant` rejects any `imageUrl` outside this project's `plant-photos` storage bucket (SSRF guard); `fetch-species-info` maps AI output field-by-field onto the schema instead of spreading untrusted JSON into the upsert; `identify-species` enforces a MIME allowlist (jpeg/png/webp/gif)
 - v1.7.0: `diagnose-plant` accepts session-photo paths only under the caller's own `{userId}/{plantId}/diagnosis/` prefix (the SSRF guard adapted to storage paths) and performs all session writes with the service role
 - Full request/response shapes, error codes, and deploy commands: see `docs/EDGE-FUNCTIONS.md`
@@ -521,3 +530,4 @@ When a version bumps, also add a matching entry to `CHANGELOG.md` (the human-fac
 - `1.6.0` — AI care assistant Session A (`docs/ASSISTANT-SPEC.md` Phase 1 + Phase 5 identity slice): `care_recommendations` table + `analyze-plant` v2 (structured actions, interval suggestions, identity context, current-schedule context); Today "Assistant — proposed" section with Accept/Done/Dismiss and dismiss-reason sheet; accepted tasks join the task list; interval confirm sheet; Plant Detail inline action rows; 14-day proposal expiry; species identity verification (dossier Confirm chip/VERIFIED tag, verified manual edits, Add Plant verified saves).
 - `1.7.0` — AI care assistant Session B (Phase 2, the flagship): interactive diagnosis sessions. New `diagnosis_sessions` table + `diagnose-plant` Edge Function (`claude-sonnet-4-6`): server-assembled context, ≤3 server-tracked ask-turns, honest Low-confidence verdicts with differentials, verdict → `diagnoses` history + `care_recommendations` proposals (incl. scheduled follow-up). Diagnose screen rework: "Examine with AI" transcript UI, Quick triage retained, Past examinations list, 24h resume/abandon. Plant-context prompt builders extracted to `supabase/functions/_shared/` (analyze-plant redeploy required).
 - `1.8.0` — AI care assistant Session C (Phase 3 + rest of Phase 5): seasonal schedule review (`lib/seasonal.ts` heuristics, monthly localStorage gate, per-season dedupe, Phase 1 confirm flow); toxicity caution caption on Plant Detail + Explore; Gemini retirement (`analyze-plant` + `fetch-species-info` Claude-only, `AI_PROVIDER`/`GEMINI_API_KEY` secrets droppable, both functions need redeploy); species fact flagging (`species_profile_flags` table, Report-an-issue sheet on species guides, Me → Flagged facts review list).
+- `1.9.0` — AI care assistant Session D (Phase 4, the final phase): care reminders via web push. `push_subscriptions` table + Me → Care reminders per-device opt-in/revoke (iOS A2HS caveat in the copy); `public/sw.js` service worker (push + click only); `lib/notifications.ts` stub → real helpers; `send-care-push` Edge Function (no AI; `x-cron-secret` auth, service role) sends one digest/user/day of overdue care + due assistant tasks, silent on quiet days, deep-link to Today, self-pruning subscriptions; scheduled by pg_cron + pg_net at 13:00 UTC (manual SQL in SETUP.md). Manual steps: migration, VAPID keys + `CRON_SECRET` secrets, `NEXT_PUBLIC_VAPID_PUBLIC_KEY` env (local + Vercel), function deploy, cron schedule.

@@ -20,7 +20,9 @@ structural changes. Conventions and gotchas for day-to-day coding live in
 │  • Postgres + RLS (per-user rows; shared species cache)     │
 │  • Storage: public `plant-photos` bucket                    │
 │  • Edge Functions (Deno): analyze-plant, diagnose-plant,    │
-│    fetch-species-info, identify-species, suggest-species    │
+│    fetch-species-info, identify-species, suggest-species,   │
+│    send-care-push (cron-invoked, no user JWT)                │
+│  • pg_cron + pg_net: daily 13:00 UTC → send-care-push        │
 └───────────────────────────┬─────────────────────────────────┘
                             │ server-side fetch (keys never in browser)
                             ▼
@@ -96,8 +98,9 @@ Full contracts: [EDGE-FUNCTIONS.md](EDGE-FUNCTIONS.md).
 **Provider:** Claude only — the `AI_PROVIDER` switch and Gemini branches were retired
 in v1.8.0 (spec decision #1). Haiku on the volume paths, Sonnet on `diagnose-plant`.
 
-**Security model (since v1.5.0):** all five functions are deployed `--no-verify-jwt` but
-authenticate every call via `getUser()`; `analyze-plant` only fetches images from this
+**Security model (since v1.5.0):** all functions are deployed `--no-verify-jwt`; the five
+AI functions authenticate every call via `getUser()` (`send-care-push` instead requires
+the `x-cron-secret` header — no user on that path); `analyze-plant` only fetches images from this
 project's `plant-photos` bucket (SSRF guard) and detects media type from magic bytes;
 `diagnose-plant` only accepts session-photo paths under the caller's own
 `{userId}/{plantId}/diagnosis/` prefix and writes sessions with the service role;
@@ -107,6 +110,35 @@ project's `plant-photos` bucket (SSRF guard) and detects media type from magic b
 **Cost control by design:** species profiles are generated once per species globally;
 re-analysis sits behind a confirm dialog + cooldown; `suggest-species` skips the AI for
 empty queries.
+
+## The push pipeline (v1.9.0)
+
+The one flow where the system reaches out instead of being asked:
+
+```
+Settings opt-in (user gesture)                       pg_cron, daily 13:00 UTC
+  → register /sw.js + Notification permission          → net.http_post + x-cron-secret
+  → PushManager.subscribe(VAPID public key)            → send-care-push (service role):
+  → row in push_subscriptions (RLS, upsert               overdue care + due assistant
+    on the unique endpoint)                              tasks → ONE digest per user
+                                                           → web-push → push service
+Browser/OS wakes /sw.js on `push`                            → all the user's devices
+  → showNotification → click deep-links to Today (/)
+```
+
+- **Key split:** the VAPID *public* key reaches the browser as
+  `NEXT_PUBLIC_VAPID_PUBLIC_KEY` (build-time env); the *private* key and `CRON_SECRET`
+  exist only in Supabase secrets. Nothing secret is in this repo.
+- **Auth inversion:** `send-care-push` is the one function with no user JWT — it
+  authenticates its caller (pg_cron) by the `x-cron-secret` header and fails closed if
+  the secret is unconfigured. All data access happens with the service role.
+- **Hard rules:** max one push per user per day (`last_pushed_at` bookkeeping), silence
+  on quiet days, and self-cleaning subscriptions (404/410 from the push service deletes
+  the row; revoking from Settings deletes it client-side first).
+- **Platform caveat:** iOS only exposes `PushManager` inside an installed (Add to Home
+  Screen) PWA — the Settings card explains this instead of silently failing.
+- The service worker (`public/sw.js`) does push + notification-click only — **no offline
+  caching**, so it can't serve stale app shells.
 
 ## Deployment notes
 
@@ -118,8 +150,10 @@ empty queries.
 - **After pushing, check the Vercel dashboard.** A lint error once failed every build for
   six weeks while production silently served the previous version (v1.4.0 → v1.5.0 lesson).
 - `next.config.ts` allowlists `*.supabase.co/storage/v1/object/public/**` for `next/image`.
-- The app is a PWA (`public/manifest.json`); web push is intentionally **not** implemented
-  (`lib/notifications.ts` is a no-op stub).
+- The app is a PWA (`public/manifest.json`). Web push shipped in v1.9.0: `public/sw.js` +
+  `lib/notifications.ts` on the client, `send-care-push` + pg_cron on the server (see
+  "The push pipeline" above). `NEXT_PUBLIC_VAPID_PUBLIC_KEY` must be set in `.env.local`
+  and the Vercel dashboard for the opt-in to work.
 
 ## Design system
 

@@ -1,8 +1,9 @@
 # Viriditas — Edge Function API Reference
 
 **Purpose:** request/response contract, auth model, error behavior, and deploy commands for
-the five Supabase Edge Functions that power the AI features. Source of truth is the code in
-`supabase/functions/*/index.ts`; this file mirrors it as of v1.8.0.
+the six Supabase Edge Functions — five that power the AI features plus `send-care-push`
+(the cron-invoked web-push digest sender, v1.9.0). Source of truth is the code in
+`supabase/functions/*/index.ts`; this file mirrors it as of v1.9.0.
 
 > **Shared modules (v1.7.0):** `supabase/functions/_shared/` holds the plant-context
 > prompt builders (`plant-context.ts`) and image fetching with magic-byte type detection
@@ -10,7 +11,10 @@ the five Supabase Edge Functions that power the AI features. Source of truth is 
 > `_shared/` into each function at deploy time — **changing a shared file requires
 > redeploying every function that imports it.**
 
-## Common behavior (all five functions)
+## Common behavior (the five AI functions)
+
+> `send-care-push` is the exception to the auth and CORS rules below — it is never called
+> from the browser. See its own section at the bottom.
 
 - **Auth (required):** functions are deployed with `--no-verify-jwt`, so each validates the
   caller itself. The browser must send `Authorization: Bearer <supabase access token>`; the
@@ -37,7 +41,9 @@ Set via `supabase secrets set KEY=value` (functions must be redeployed to pick u
 
 | Secret | Used by | Notes |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | all five | required |
+| `ANTHROPIC_API_KEY` | the five AI functions | required |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | `send-care-push` | web-push VAPID identity; generate with `npx web-push generate-vapid-keys`, subject is a `mailto:` address. The public key is also exposed to the client as `NEXT_PUBLIC_VAPID_PUBLIC_KEY` (env, not a Supabase secret) |
+| `CRON_SECRET` | `send-care-push` | shared secret pg_cron sends in the `x-cron-secret` header; generate with `openssl rand -hex 32` |
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | (auto) | injected by Supabase; not set manually |
 
 > **Gemini retired (v1.8.0, spec decision #1):** the `AI_PROVIDER` switch, the Gemini
@@ -55,6 +61,7 @@ Set via `supabase secrets set KEY=value` (functions must be redeployed to pick u
 | `identify-species` | `claude-haiku-4-5-20251001` |
 | `suggest-species` | `claude-haiku-4-5-20251001` |
 | `diagnose-plant` | `claude-sonnet-4-6` (highest-stakes path — see spec cost note) |
+| `send-care-push` | — (no AI; sends web push) |
 
 ### Deploy
 
@@ -64,6 +71,7 @@ supabase functions deploy fetch-species-info --no-verify-jwt
 supabase functions deploy identify-species --no-verify-jwt
 supabase functions deploy suggest-species --no-verify-jwt
 supabase functions deploy diagnose-plant --no-verify-jwt
+supabase functions deploy send-care-push --no-verify-jwt
 ```
 
 ---
@@ -303,3 +311,67 @@ migration is applied in production**).
   client then inserts `care_recommendations` proposals for the next steps + follow-up.
 - Up to the 4 most recent session photos are attached to the model call, fetched with
   magic-byte media-type detection (`_shared/images.ts`).
+
+---
+
+## `send-care-push` *(v1.9.0)*
+
+The daily care-digest sender (Phase 4 of `docs/ASSISTANT-SPEC.md`). Not an AI function
+and **never called from the browser** — pg_cron + pg_net invoke it once a day at
+13:00 UTC (~9 am Eastern; see the schedule SQL in [SETUP.md](SETUP.md) step 5).
+
+**Auth:** there is no user JWT on this path. The caller must send
+`x-cron-secret: <CRON_SECRET>`; any other request gets **401**. If `CRON_SECRET` is not
+configured the function refuses to run (**500** — fails closed, never open). POST only
+(**405** otherwise). No CORS headers — browsers have no business here.
+
+**Request** (header `x-cron-secret` required):
+
+```json
+{}
+```
+
+**Response 200:**
+
+```json
+{ "ok": true, "usersConsidered": 2, "usersPushed": 1, "sent": 2, "pruned": 0, "skipped": 0 }
+```
+
+`usersConsidered` = users with ≥1 subscription · `usersPushed` = users who received a
+digest · `sent` = individual device pushes · `pruned` = dead subscriptions deleted ·
+`skipped` = users already pushed today.
+
+**What it sends.** Per subscribed user it gathers, with the service role:
+
+- **Overdue care** — plants whose watering or fertilizing interval has lapsed (the same
+  rule as `computeWateringStatus` in `lib/utils.ts`: more days since the last
+  `watered`/`fertilized` log than the interval, or no log at all). Due-soon is *not*
+  included — pushes are for things that need action now.
+- **Assistant tasks due** — `care_recommendations` with status `proposed`/`accepted` and
+  `due_date` ≤ today (Eastern). This is what carries diagnosis follow-up checks.
+
+If anything is due, ONE digest goes to all of the user's devices — e.g. title
+`2 plants need you 🌿`, body `Water Mabel · Recheck lower leaves (Big Fern)`, capped at
+4 items + `+N more`. The payload deep-links to Today (`/`); `public/sw.js` renders it and
+handles the click.
+
+**Hard rules** (from the spec):
+
+- **Max one push per user per day** — enforced via `push_subscriptions.last_pushed_at`
+  (set after a successful send; users with any subscription already pushed today in
+  Eastern time are skipped), so even a double-fired cron can't spam.
+- **Silence on quiet days** — a user with nothing due gets nothing at all.
+
+**Subscription hygiene:** a push endpoint answering **404/410** means the browser revoked
+the subscription (permission withdrawn, app uninstalled) — the row is deleted. Other send
+errors are logged and the subscription is kept.
+
+**Notes**
+
+- Sends use `npm:web-push@3.6.7` under Deno's npm compatibility with VAPID keys from
+  Supabase secrets. The client subscribes with the matching public key
+  (`NEXT_PUBLIC_VAPID_PUBLIC_KEY` env var → `lib/notifications.ts`).
+- "Today" is computed in `America/New_York`, matching the app's hardcoded
+  northern-hemisphere assumption.
+- Database reads follow the 3-query enrichment pattern (plants, then care_logs +
+  care_recommendations batched with `.in(...)`) regardless of user count.
